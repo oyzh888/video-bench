@@ -19,7 +19,7 @@ def assets(quick: bool):
 def transcode(src: Path, out: Path, vcodec: str, extra: list[str] | None = None,
               preset: str = "medium", crf: int | None = 23,
               filters: list[str] | None = None) -> dict:
-    cmd = [FFMPEG, "-y", "-hide_banner", "-nostats"]
+    cmd = [FFMPEG, "-y", "-hide_banner"]
     if vcodec.endswith("_nvenc") or vcodec.endswith("_cuvid"):
         # Let NVDEC handle decode where possible
         pass
@@ -80,9 +80,10 @@ def main(quick: bool = False) -> dict:
         record("nvenc_4k_to_1080p", src=src_4k, vcodec="h264_nvenc",
                preset="p4", crf=23, filters=["scale=1920:1080"])
 
-    # Decode-only (null encoder)
-    cmd = [FFMPEG, "-y", "-hide_banner", "-nostats",
-           "-i", str(src_4k), "-f", "null", "-"]
+    # Decode-only — use rawvideo to /dev/null. Some minimal ffmpeg builds
+    # disable the default `wrapped_avframe` encoder, so we avoid relying on it.
+    cmd = [FFMPEG, "-y", "-hide_banner",
+           "-i", str(src_4k), "-c:v", "rawvideo", "-an", "-f", "null", "-"]
     rc, log, dt = run(cmd, timeout=600)
     src_dur = clip_duration(src_4k)
     results["tests"]["decode_only_4k"] = {

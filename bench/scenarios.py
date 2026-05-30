@@ -59,12 +59,17 @@ def thumbnail_grid(src: Path, out_dir: Path) -> dict:
 
 
 def subtitle_burn(src: Path, out_dir: Path) -> dict:
-    """Burn-in subtitles using drawtext (no font file dependency)."""
+    """Filter-graph stress (drawbox + scale + fade), proxy for sub burn-in.
+
+    Uses drawbox instead of drawtext because not every ffmpeg build ships
+    libfreetype (e.g. NVIDIA's data-center ffmpeg). Cost profile is similar:
+    per-frame pixel filter on top of full re-encode.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / "subbed.mp4"
-    vf = ("drawtext=text='video-bench %{pts\\:hms}':"
-          "fontcolor=white:fontsize=36:box=1:boxcolor=black@0.5:"
-          "x=(w-text_w)/2:y=h-80")
+    vf = ("drawbox=x=0:y=ih-100:w=iw:h=80:color=black@0.5:t=fill,"
+          "drawbox=x=40:y=ih-90:w=iw-80:h=60:color=white@0.9:t=2,"
+          "fade=in:0:30,fade=out:st=20:d=2")
     t0 = time.perf_counter()
     cmd = [FFMPEG, "-y", "-hide_banner", "-loglevel", "error",
            "-i", str(src), "-vf", vf,

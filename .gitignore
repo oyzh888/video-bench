@@ -1,4 +1,7 @@
 results/*.json
+!results/pluto-H100-baseline.json
+!results/sample-*.json
 assets/
 __pycache__/
 *.pyc
+report.html

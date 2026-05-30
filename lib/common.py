@@ -18,14 +18,37 @@ def have(cmd: str) -> bool:
     return shutil.which(cmd) is not None
 
 
+_nvenc_cache: Optional[bool] = None
+
 def have_nvenc() -> bool:
+    """True only if h264_nvenc actually opens an encoder session on this box.
+
+    `nvidia-smi` + listed encoder are not enough — some data-center GPU
+    profiles (MIG, vGPU) ship without working NVENC, in which case we
+    must skip GPU tests entirely.
+    """
+    global _nvenc_cache
+    if _nvenc_cache is not None:
+        return _nvenc_cache
     if not have("nvidia-smi"):
+        _nvenc_cache = False
         return False
     try:
         out = subprocess.run([FFMPEG, "-hide_banner", "-encoders"],
                              capture_output=True, text=True, timeout=10)
-        return "h264_nvenc" in out.stdout
+        if "h264_nvenc" not in out.stdout:
+            _nvenc_cache = False
+            return False
+        # Real probe: encode 0.5s of testsrc into /dev/null
+        probe = subprocess.run(
+            [FFMPEG, "-hide_banner", "-loglevel", "error", "-y",
+             "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=30:duration=0.5",
+             "-c:v", "h264_nvenc", "-f", "null", "-"],
+            capture_output=True, text=True, timeout=20)
+        _nvenc_cache = probe.returncode == 0
+        return _nvenc_cache
     except Exception:
+        _nvenc_cache = False
         return False
 
 
