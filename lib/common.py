@@ -72,6 +72,31 @@ def run(cmd: list[str], timeout: int = 600) -> tuple[int, str, float]:
         return 124, f"TIMEOUT after {timeout}s\n{e}", time.perf_counter() - t0
 
 
+def real_clip(seconds: int = 30) -> Optional[Path]:
+    """Download a public-domain reference clip (Big Buck Bunny 1080p) and
+    trim to `seconds`. Returns path or None on failure (bench falls back to
+    synthetic). Cached after first download.
+    """
+    import urllib.request
+    cache = ASSETS / f"bbb_1080p_{seconds}s.mp4"
+    if cache.exists() and cache.stat().st_size > 0:
+        return cache
+    src = ASSETS / "bbb_1080p_source.mp4"
+    if not src.exists():
+        # Mirror used by ffmpeg-tests; small (148 MB), CC-BY 3.0
+        url = "https://download.blender.org/peach/bigbuckbunny_movies/big_buck_bunny_1080p_h264.mov"
+        try:
+            print(f"   downloading reference clip ({url}) ...")
+            urllib.request.urlretrieve(url, src)
+        except Exception as e:
+            print(f"   real-clip download failed: {e}")
+            return None
+    rc, log, _ = run([FFMPEG, "-y", "-hide_banner", "-loglevel", "error",
+                      "-ss", "60", "-i", str(src), "-t", str(seconds),
+                      "-c", "copy", str(cache)], timeout=120)
+    return cache if rc == 0 else None
+
+
 def gen_clip(name: str, seconds: int, w: int, h: int, fps: int = 30,
              codec: str = "libx264", crf: int = 23) -> Path:
     """Generate a synthetic test clip if missing. Returns its path."""

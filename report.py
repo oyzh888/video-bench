@@ -129,12 +129,24 @@ def render(runs: list[dict]) -> str:
     for k in keys:
         verdict_rows.append(row(k, [v[k] for v in verdicts]))
 
+    # ---------- Quality (PSNR/SSIM at fixed bitrate) ----------
+    qual_rows = []
+    qual_keys = sorted({k for r in runs for k in r.get("quality", {}).get("tests", {}).keys()})
+    for k in qual_keys:
+        qual_rows.append(row(f"{k} — encode wall (s)",
+            [r.get("quality", {}).get("tests", {}).get(k, {}).get("encode_wall_s") for r in runs]))
+        qual_rows.append(row(f"{k} — PSNR (dB, higher=better)",
+            [r.get("quality", {}).get("tests", {}).get(k, {}).get("psnr_db") for r in runs]))
+        qual_rows.append(row(f"{k} — SSIM (closer to 1.0 = better)",
+            [r.get("quality", {}).get("tests", {}).get(k, {}).get("ssim") for r in runs]))
+
     sections = [
         ("Verdict (TL;DR)", verdict_rows),
         ("Hardware / probe", probe_rows),
         ("Single-clip render times", single_rows),
         ("Concurrent throughput", conc_rows),
         ("Realistic scenarios", scen_rows),
+        ("Encoding quality vs speed (PSNR/SSIM @ 4 Mbps)", qual_rows),
     ]
 
     parts = ['<!doctype html><meta charset="utf-8"><title>video-bench report</title>',

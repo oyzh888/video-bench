@@ -22,9 +22,30 @@ then `python3 report.py` produces a side-by-side HTML report.
 | Scenario    | Thumbnail extraction (1 fps grid) | Preview generation                     |
 | Scenario    | Subtitle burn-in                  | Filter-graph cost                      |
 | I/O         | Sequential & random disk          | Storage isn't the bottleneck check     |
+| Quality     | PSNR / SSIM @ fixed bitrate       | Encoding quality (Netflix VMAF style)  |
 
 All clips are **synthetically generated** by ffmpeg `testsrc2`, so there's no
 asset download and every machine runs the exact same input.
+
+## Live comparison dashboard
+
+Auto-published to GitHub Pages on every push to `results/`:
+**https://oyzh888.github.io/video-bench/**
+
+To add your machine's numbers, just commit `results/<your-host>-*.json` and push.
+
+## Why this design (vs other open benchmarks)
+
+| Bench | Strength | Why we're different |
+|-------|----------|---------------------|
+| [c3voc/transcoding-benchmark](https://github.com/voc/transcoding-benchmark) | Standard 1080p clip, x264/x265 sweep | Single-threaded only, no concurrency curve, no scenarios |
+| [Netflix VMAF](https://github.com/Netflix/vmaf) | Gold-standard quality metric | Quality-only, doesn't measure throughput |
+| [Jellyfin ffmpeg-test](https://github.com/jellyfin/jellyfin-ffmpeg) | Real HW decode + concurrent transcode | Tied to Jellyfin runtime, harder to run standalone |
+| **video-bench** | Throughput + concurrency + scenarios + PSNR/SSIM | Stdlib-only, runs anywhere, 2-min total |
+
+We optionally cross-check against the **Big Buck Bunny** reference clip
+(used by all the above) via `./run.sh --real-clip` — that's the way to
+compare numbers with published benchmarks elsewhere.
 
 ## Quick start
 
