@@ -1,0 +1,4 @@
+results/*.json
+assets/
+__pycache__/
+*.pyc
