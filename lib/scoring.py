@@ -65,18 +65,55 @@ def score_parallel(run: dict) -> dict:
 
 
 def score_gpu(run: dict) -> dict:
-    """NVENC 1080p ×realtime. 0 (or unavailable) → 0, 50× → 100.
-    No GPU at all returns 0 (not None) so GPU-less laptops correctly score
-    low here — that's a real video-work disadvantage."""
+    """GPU acceleration score — credits whichever GPU path actually works
+    AND provides speedup vs CPU on this box.
+
+    Three cases (in priority order):
+      1. NVENC works → score by NVENC ×realtime (1080p), 50× = 100.
+      2. NVDEC works AND beats CPU decode → partial credit by speedup ratio,
+         capped at 50 (NVDEC alone is half a video-acceleration story).
+      3. No working GPU acceleration → 0.
+
+    Why this matters: H100/H200 ship without NVENC silicon (compute-only
+    SKUs) but still have NVDEC. On big-CPU boxes, NVDEC often loses to
+    libx264 software decode due to PCIe overhead — we want the score to
+    reflect real-world useful acceleration, not just hardware presence.
+    """
     nvenc_works = _get(run, "probe", "ffmpeg", "nvenc")
-    speed = _get(run, "single", "tests", "nvenc_h264_1080p", "speed_x_realtime")
-    if not nvenc_works or speed is None:
-        return {"score": 0.0, "raw": None, "raw_unit": "× realtime",
+    nvdec_works = _get(run, "probe", "ffmpeg", "nvdec")
+    nvenc_speed = _get(run, "single", "tests", "nvenc_h264_1080p", "speed_x_realtime")
+
+    if nvenc_works and nvenc_speed:
+        return {"score": _scale(nvenc_speed, 0.0, 50.0),
+                "raw": nvenc_speed, "raw_unit": "× realtime (NVENC)",
                 "label": "GPU encode (NVENC h264)",
-                "note": "NVENC not working on this machine"}
-    score = _scale(speed, 0.0, 50.0)
-    return {"score": score, "raw": speed, "raw_unit": "× realtime",
-            "label": "GPU encode (NVENC h264)"}
+                "mode": "nvenc"}
+
+    # NVDEC fallback: compare 4K decode-only NVDEC vs CPU
+    nvdec_4k = _get(run, "single", "tests", "decode_only_4k_nvdec", "speed_x_realtime")
+    cpu_4k   = _get(run, "single", "tests", "decode_only_4k", "speed_x_realtime")
+    if nvdec_works and nvdec_4k and cpu_4k:
+        speedup = nvdec_4k / cpu_4k  # >1 means NVDEC helps
+        # Speedup of 1.0× → 0 score; 4× → 50 score (max for decode-only).
+        # NVDEC alone is capped at 50 — it's only half of the video pipeline.
+        s = _scale(speedup, 1.0, 4.0)
+        score = (s or 0) * 0.5
+        note = ("NVDEC works but is slower than CPU on this box"
+                if speedup < 1.0 else f"NVDEC gives {speedup:.1f}× speedup over CPU decode")
+        return {"score": score, "raw": f"{nvdec_4k:.0f}× rt (vs CPU {cpu_4k:.0f}×)",
+                "raw_unit": "× realtime (NVDEC)",
+                "label": "GPU acceleration (NVDEC decode)",
+                "mode": "nvdec",
+                "note": note}
+
+    if nvdec_works:
+        return {"score": 0.0, "raw": None, "raw_unit": "—",
+                "label": "GPU acceleration",
+                "note": "NVDEC available but no benchmark data"}
+
+    return {"score": 0.0, "raw": None, "raw_unit": "—",
+            "label": "GPU acceleration",
+            "note": "No working GPU encode/decode"}
 
 
 def score_quality(run: dict) -> dict:

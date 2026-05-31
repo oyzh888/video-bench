@@ -61,6 +61,44 @@ def have_encoder(name: str) -> bool:
         return False
 
 
+_nvdec_cache: Optional[bool] = None
+
+def have_nvdec() -> bool:
+    """True if `-hwaccel cuda` actually decodes a frame end-to-end.
+    NVDEC silicon is present on most NVIDIA GPUs (including H100, which
+    has no NVENC), but the ffmpeg build needs CUDA hwaccel and the env
+    needs to expose the GPU. We probe by decoding 0.5s of generated h264
+    via cuda hwaccel."""
+    global _nvdec_cache
+    if _nvdec_cache is not None:
+        return _nvdec_cache
+    if not have("nvidia-smi"):
+        _nvdec_cache = False; return False
+    try:
+        # Need a real h264 stream to decode (lavfi testsrc isn't h264)
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
+            tmp = f.name
+        gen = subprocess.run(
+            [FFMPEG, "-hide_banner", "-loglevel", "error", "-y",
+             "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=30:duration=0.5",
+             "-c:v", "libx264", "-preset", "ultrafast", tmp],
+            capture_output=True, text=True, timeout=20)
+        if gen.returncode != 0:
+            _nvdec_cache = False; return False
+        probe = subprocess.run(
+            [FFMPEG, "-hide_banner", "-loglevel", "error", "-y",
+             "-hwaccel", "cuda", "-i", tmp,
+             "-c:v", "rawvideo", "-an", "-f", "null", "-"],
+            capture_output=True, text=True, timeout=20)
+        try: os.unlink(tmp)
+        except OSError: pass
+        _nvdec_cache = probe.returncode == 0
+        return _nvdec_cache
+    except Exception:
+        _nvdec_cache = False; return False
+
+
 def run(cmd: list[str], timeout: int = 600) -> tuple[int, str, float]:
     """Run a command, return (rc, combined_output, wall_seconds)."""
     t0 = time.perf_counter()

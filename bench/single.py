@@ -6,7 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from lib.common import (FFMPEG, gen_clip, run, clip_duration,
                         parse_ffmpeg_speed, parse_ffmpeg_fps,
-                        have_nvenc, have_encoder)
+                        have_nvenc, have_nvdec, have_encoder)
 
 # Two source clips: 1080p30 and 4K30, both 30 seconds.
 def assets(quick: bool):
@@ -18,11 +18,11 @@ def assets(quick: bool):
 
 def transcode(src: Path, out: Path, vcodec: str, extra: list[str] | None = None,
               preset: str = "medium", crf: int | None = 23,
-              filters: list[str] | None = None) -> dict:
+              filters: list[str] | None = None,
+              hwaccel: str | None = None) -> dict:
     cmd = [FFMPEG, "-y", "-hide_banner"]
-    if vcodec.endswith("_nvenc") or vcodec.endswith("_cuvid"):
-        # Let NVDEC handle decode where possible
-        pass
+    if hwaccel:
+        cmd += ["-hwaccel", hwaccel]
     cmd += ["-i", str(src)]
     if filters:
         cmd += ["-vf", ",".join(filters)]
@@ -70,6 +70,17 @@ def main(quick: bool = False) -> dict:
     record("x264_4k_to_1080p", src=src_4k, vcodec="libx264", preset="medium", crf=23,
            filters=["scale=1920:1080"])
 
+    # GPU-decode hybrid (NVDEC + CPU encode). Often a win on encoder-less
+    # NVIDIA SKUs (H100/H200 have no NVENC but do have NVDEC), but only if
+    # PCIe transfer beats the CPU decode path — which on big CPU boxes,
+    # surprisingly, it often doesn't. Worth measuring.
+    if have_nvdec():
+        record("nvdec_h264_4k_to_1080p", src=src_4k, vcodec="libx264",
+               preset="veryfast", crf=23,
+               filters=["scale=1920:1080"], hwaccel="cuda")
+        record("nvdec_h264_1080p_reencode", src=src_1080, vcodec="libx264",
+               preset="veryfast", crf=23, hwaccel="cuda")
+
     # GPU encodes
     if have_nvenc():
         record("nvenc_h264_1080p", src=src_1080, vcodec="h264_nvenc",
@@ -80,8 +91,8 @@ def main(quick: bool = False) -> dict:
         record("nvenc_4k_to_1080p", src=src_4k, vcodec="h264_nvenc",
                preset="p4", crf=23, filters=["scale=1920:1080"])
 
-    # Decode-only — use rawvideo to /dev/null. Some minimal ffmpeg builds
-    # disable the default `wrapped_avframe` encoder, so we avoid relying on it.
+    # Decode-only (CPU). Some minimal ffmpeg builds disable
+    # `wrapped_avframe`, so we force rawvideo for the null sink.
     cmd = [FFMPEG, "-y", "-hide_banner",
            "-i", str(src_4k), "-c:v", "rawvideo", "-an", "-f", "null", "-"]
     rc, log, dt = run(cmd, timeout=600)
@@ -94,6 +105,20 @@ def main(quick: bool = False) -> dict:
         "ffmpeg_fps": parse_ffmpeg_fps(log),
         "error": None if rc == 0 else log[-400:],
     }
+
+    # NVDEC-only decode (no encode) — pure GPU decode throughput
+    if have_nvdec():
+        cmd = [FFMPEG, "-y", "-hide_banner", "-hwaccel", "cuda",
+               "-i", str(src_4k), "-c:v", "rawvideo", "-an", "-f", "null", "-"]
+        rc, log, dt = run(cmd, timeout=600)
+        results["tests"]["decode_only_4k_nvdec"] = {
+            "ok": rc == 0,
+            "wall_s": round(dt, 3),
+            "src_duration_s": round(src_dur, 3),
+            "speed_x_realtime": round(src_dur / dt, 2) if dt else None,
+            "ffmpeg_fps": parse_ffmpeg_fps(log),
+            "error": None if rc == 0 else log[-400:],
+        }
     return results
 
 

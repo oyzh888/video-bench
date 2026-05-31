@@ -87,7 +87,16 @@ def verdict_card(run: dict) -> str:
     gpus = run.get("probe", {}).get("gpus", [])
     gpu = gpus[0]["name"] if gpus else "no GPU"
     nvenc = run.get("probe", {}).get("ffmpeg", {}).get("nvenc")
-    nvenc_str = "✅ NVENC" if nvenc else "❌ NVENC unavailable"
+    nvdec = run.get("probe", {}).get("ffmpeg", {}).get("nvdec")
+    if nvenc and nvdec:
+        gpu_str = "✅ NVENC + NVDEC"
+    elif nvenc:
+        gpu_str = "✅ NVENC only"
+    elif nvdec:
+        gpu_str = "🟡 NVDEC only (no NVENC)"
+    else:
+        gpu_str = "❌ no GPU video accel"
+    nvenc_str = gpu_str
 
     tier_color = TIER_COLORS.get(sc["tier"], "#666")
     dims = sc["dimensions"]
@@ -96,10 +105,12 @@ def verdict_card(run: dict) -> str:
         s = d.get("score") or 0
         raw = d.get("raw")
         raw_str = f"{raw}" if raw is not None else "—"
+        note = d.get("note")
+        note_html = f'<div class="dim-note">{html.escape(note)}</div>' if note else ""
         dim_bars += f"""
     <div class="dim">
       <div class="dim-label">{html.escape(d['label'])}<span class="dim-raw">{html.escape(str(raw_str))}</span></div>
-      <div class="dim-bar"><div class="dim-fill" style="width:{s:.0f}%"></div><span class="dim-score">{s:.0f}</span></div>
+      <div class="dim-bar"><div class="dim-fill" style="width:{s:.0f}%"></div><span class="dim-score">{s:.0f}</span></div>{note_html}
     </div>"""
 
     return f"""
@@ -289,6 +300,7 @@ def render(runs: list[dict]) -> str:
   .dim-bar{{position:relative;height:14px;background:#eef0f3;border-radius:7px;overflow:hidden}}
   .dim-fill{{position:absolute;top:0;left:0;height:100%;background:linear-gradient(90deg,#22c55e,#0969da);border-radius:7px;transition:width .4s}}
   .dim-score{{position:absolute;right:8px;top:0;font-size:11px;font-weight:700;color:#222;line-height:14px}}
+  .dim-note{{font-size:11px;color:#9a6700;margin-top:3px;font-style:italic}}
   details.card-details{{margin-top:8px;font-size:13px}}
   details.card-details summary{{cursor:pointer;color:#0969da;font-size:12px;outline:none}}
   table.leaderboard{{width:100%;border-collapse:collapse;background:#fff;font-size:13px}}

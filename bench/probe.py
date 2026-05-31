@@ -4,7 +4,7 @@ import json, os, platform, re, shutil, subprocess, sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from lib.common import FFMPEG, have, have_nvenc, run
+from lib.common import FFMPEG, have, have_nvenc, have_nvdec, run
 
 
 def cpu_info() -> dict:
@@ -76,7 +76,8 @@ def ffmpeg_info() -> dict:
                   "h264_videotoolbox", "hevc_videotoolbox", "h264_qsv"):
         if re.search(rf"\b{re.escape(codec)}\b", enc):
             encoders.append(codec)
-    return {"version": ver, "encoders": encoders, "nvenc": have_nvenc()}
+    return {"version": ver, "encoders": encoders,
+            "nvenc": have_nvenc(), "nvdec": have_nvdec()}
 
 
 def disk_info() -> dict:
