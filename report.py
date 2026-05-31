@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT))
 from lib.capacity import (capacity_summary, batch_minutes, parallel_efficiency,
                           max_realtime_streams, best_concurrent_throughput,
                           single_video_seconds)
+from lib.scoring import score_run, WEIGHTS
 
 
 def load_all() -> list[dict]:
@@ -74,8 +75,12 @@ def fmt_sec(v):
     return f"{v/60:.1f} min"
 
 
+TIER_COLORS = {"S":"#a855f7","A":"#0969da","B":"#1a7f37","C":"#9a6700","D":"#cf222e","—":"#666"}
+
+
 def verdict_card(run: dict) -> str:
     cap = capacity_summary(run)
+    sc = score_run(run)
     cpu_name = (run.get("probe", {}).get("cpu", {}).get("model") or "?")[:60]
     cores = run.get("probe", {}).get("cpu", {}).get("cores", "?")
     ram = run.get("probe", {}).get("mem", {}).get("total_gb", "?")
@@ -84,14 +89,34 @@ def verdict_card(run: dict) -> str:
     nvenc = run.get("probe", {}).get("ffmpeg", {}).get("nvenc")
     nvenc_str = "✅ NVENC" if nvenc else "❌ NVENC unavailable"
 
-    speed = (run.get("single", {}).get("tests", {})
-             .get("x264_1080p_medium", {}).get("speed_x_realtime"))
+    tier_color = TIER_COLORS.get(sc["tier"], "#666")
+    dims = sc["dimensions"]
+    dim_bars = ""
+    for k, d in dims.items():
+        s = d.get("score") or 0
+        raw = d.get("raw")
+        raw_str = f"{raw}" if raw is not None else "—"
+        dim_bars += f"""
+    <div class="dim">
+      <div class="dim-label">{html.escape(d['label'])}<span class="dim-raw">{html.escape(str(raw_str))}</span></div>
+      <div class="dim-bar"><div class="dim-fill" style="width:{s:.0f}%"></div><span class="dim-score">{s:.0f}</span></div>
+    </div>"""
 
     return f"""
 <div class="card">
-  <div class="card-h">{html.escape(short_label(run))}</div>
-  <div class="card-spec">{html.escape(cpu_name)} · {cores}c · {ram}GB · {html.escape(gpu)} · {nvenc_str}</div>
-  <div class="big">{(speed or 0):.1f}× <span class="unit">realtime (1080p x264 medium)</span></div>
+  <div class="card-top">
+    <div>
+      <div class="card-h">{html.escape(short_label(run))}</div>
+      <div class="card-spec">{html.escape(cpu_name)} · {cores}c · {ram}GB · {html.escape(gpu)} · {nvenc_str}</div>
+    </div>
+    <div class="tier-block" style="background:{tier_color}">
+      <div class="tier-letter">{sc['tier']}</div>
+      <div class="tier-score">{(sc['composite'] or 0):.0f}<span class="tier-suffix"> / 100</span></div>
+    </div>
+  </div>
+  <div class="tier-blurb">{html.escape(sc['tier_blurb'])}</div>
+  <div class="dim-grid">{dim_bars}</div>
+  <details class="card-details"><summary>Capacity scenarios</summary>
   <table class="kv">
     <tr><td>100× 1-min YouTube videos (medium)</td><td><b>{fmt_min(cap['scenario_100x_1min_youtube_medium_min'])}</b></td></tr>
     <tr><td>100× 1-min fast delivery (veryfast)</td><td><b>{fmt_min(cap['scenario_100x_1min_fast_delivery_min'])}</b></td></tr>
@@ -99,11 +124,46 @@ def verdict_card(run: dict) -> str:
     <tr><td>Single 5-min YouTube clip export</td><td><b>{fmt_sec(cap['scenario_single_5min_export_s'])}</b></td></tr>
     <tr><td>Single 30-min podcast 1080p export</td><td><b>{fmt_min(cap['scenario_single_30min_export_min'])}</b></td></tr>
     <tr><td>Single 1-hr long-form export</td><td><b>{fmt_min(cap['scenario_single_60min_export_min'])}</b></td></tr>
-    <tr><td>Concurrent CPU peak throughput</td><td><b>{cap['best_throughput_videos_per_min'] or '—'} videos/min</b></td></tr>
     <tr><td>Max simultaneous 1080p30 realtime streams</td><td><b>{cap['max_realtime_1080p_streams'] or '—'}</b></td></tr>
     <tr><td>Parallel scaling efficiency</td><td><b>{cap['parallel_efficiency_x'] or '—'}×</b></td></tr>
-  </table>
+  </table></details>
 </div>"""
+
+
+def leaderboard(runs: list[dict]) -> str:
+    """Sortable summary: rank by composite, show all dimensions."""
+    scored = [(r, score_run(r)) for r in runs]
+    scored.sort(key=lambda x: (x[1]["composite"] or 0), reverse=True)
+    dim_keys = list(WEIGHTS.keys())
+    head = ("<tr><th>#</th><th>Machine</th><th>Tier</th><th>Composite</th>" +
+            "".join(f"<th>{k.replace('_',' ')}<br><span class='w'>w={int(WEIGHTS[k]*100)}%</span></th>"
+                    for k in dim_keys) + "</tr>")
+    rows = []
+    for i, (run, sc) in enumerate(scored, 1):
+        cells = []
+        for k in dim_keys:
+            s = sc["dimensions"][k].get("score")
+            cells.append(f'<td class="dimcell">{(s or 0):.0f}</td>' if s is not None else '<td class="na">—</td>')
+        tcolor = TIER_COLORS.get(sc["tier"], "#666")
+        rows.append(
+            f"<tr><td>{i}</td><td class='m'>{html.escape(short_label(run))}</td>"
+            f"<td><span class='pill' style='background:{tcolor}'>{sc['tier']}</span></td>"
+            f"<td><b>{(sc['composite'] or 0):.1f}</b></td>"
+            + "".join(cells) + "</tr>")
+    return f"<table class='leaderboard'>{head}{''.join(rows)}</table>"
+
+
+def radar_data(runs: list[dict]) -> dict:
+    """Per-machine 6-axis vector, 0–100, for radar chart."""
+    out = []
+    dims = list(WEIGHTS.keys())
+    for r in runs:
+        sc = score_run(r)
+        out.append({
+            "label": short_label(r),
+            "values": [(sc["dimensions"][k].get("score") or 0) for k in dims],
+        })
+    return {"axes": [k.replace("_"," ") for k in dims], "machines": out}
 
 
 def calculator_data(runs: list[dict]) -> list[dict]:
@@ -179,6 +239,8 @@ def render(runs: list[dict]) -> str:
     cards = "\n".join(verdict_card(r) for r in runs)
     cd = chart_data(runs)
     calc = calculator_data(runs)
+    rd = radar_data(runs)
+    lb = leaderboard(runs)
 
     # Raw tables (kept short — main info is in cards/charts)
     labels = [label(r) for r in runs]
@@ -215,6 +277,27 @@ def render(runs: list[dict]) -> str:
   table.kv td{{padding:5px 0;border-bottom:1px solid #f0f1f4}}
   table.kv td:last-child{{text-align:right;white-space:nowrap}}
   table.kv tr:last-child td{{border-bottom:none}}
+  .card-top{{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}}
+  .tier-block{{color:#fff;border-radius:10px;padding:10px 14px;text-align:center;min-width:90px}}
+  .tier-letter{{font-size:36px;font-weight:900;line-height:1}}
+  .tier-score{{font-size:16px;font-weight:700;margin-top:2px}}
+  .tier-suffix{{font-size:11px;font-weight:400;opacity:0.85}}
+  .tier-blurb{{font-size:12px;color:#444;font-style:italic;margin:10px 0;padding:6px 10px;background:#f3f4f6;border-radius:5px}}
+  .dim-grid{{display:flex;flex-direction:column;gap:6px;margin:12px 0 6px}}
+  .dim-label{{font-size:11px;color:#444;display:flex;justify-content:space-between;margin-bottom:2px}}
+  .dim-raw{{color:#888;font-family:ui-monospace,monospace;font-size:10.5px}}
+  .dim-bar{{position:relative;height:14px;background:#eef0f3;border-radius:7px;overflow:hidden}}
+  .dim-fill{{position:absolute;top:0;left:0;height:100%;background:linear-gradient(90deg,#22c55e,#0969da);border-radius:7px;transition:width .4s}}
+  .dim-score{{position:absolute;right:8px;top:0;font-size:11px;font-weight:700;color:#222;line-height:14px}}
+  details.card-details{{margin-top:8px;font-size:13px}}
+  details.card-details summary{{cursor:pointer;color:#0969da;font-size:12px;outline:none}}
+  table.leaderboard{{width:100%;border-collapse:collapse;background:#fff;font-size:13px}}
+  table.leaderboard th,table.leaderboard td{{border:1px solid #e1e4e8;padding:6px 10px;text-align:center}}
+  table.leaderboard th{{background:#f5f5f7;font-size:11px}}
+  table.leaderboard th .w{{font-weight:400;color:#888;font-size:10px}}
+  table.leaderboard td.m{{text-align:left;font-weight:600}}
+  table.leaderboard td.dimcell{{font-family:ui-monospace,monospace}}
+  .pill{{display:inline-block;padding:3px 12px;border-radius:12px;color:#fff;font-weight:700;font-size:13px;min-width:18px}}
   .charts{{display:grid;grid-template-columns:repeat(auto-fit,minmax(450px,1fr));gap:20px}}
   .chartbox{{background:#fff;border:1px solid #e1e4e8;border-radius:10px;padding:16px}}
   .chartbox h3{{margin:0 0 4px;font-size:15px}}
@@ -238,8 +321,20 @@ def render(runs: list[dict]) -> str:
 <h1>video-bench dashboard</h1>
 <div class="sub">{len(runs)} machine(s) compared · all scenarios extrapolated from measured per-clip speed × parallel-throughput curve · lower wall-time / higher ×realtime / higher videos-per-min = better</div>
 
-<h2>How long does this machine take? (the answer)</h2>
+<h2>Leaderboard</h2>
+<div class="sub">Composite = weighted average of 6 dimensions, each scored 0–100 against fixed reference points.
+Tiers: <span class="pill" style="background:#a855f7">S</span> 90+ ·
+<span class="pill" style="background:#0969da">A</span> 75+ ·
+<span class="pill" style="background:#1a7f37">B</span> 60+ ·
+<span class="pill" style="background:#9a6700">C</span> 40+ ·
+<span class="pill" style="background:#cf222e">D</span> &lt;40</div>
+{lb}
+
+<h2>Score breakdown — each machine</h2>
 <div class="cards">{cards}</div>
+
+<h2>Score profile (radar)</h2>
+<div class="chartbox" style="max-width:600px;margin:0 auto"><canvas id="ch_radar" height="380"></canvas></div>
 
 <h2>Performance charts</h2>
 <div class="charts">
@@ -298,6 +393,7 @@ def render(runs: list[dict]) -> str:
 <script>
 const RUNS = {json.dumps(calc)};
 const CD = {json.dumps(cd)};
+const RD = {json.dumps(rd)};
 const COLORS = ['#0969da','#cf222e','#1a7f37','#9a6700','#8250df','#bf3989','#0a3069'];
 
 // === Single-clip speed bar chart ===
@@ -408,6 +504,26 @@ const COLORS = ['#0969da','#cf222e','#1a7f37','#9a6700','#8250df','#bf3989','#0a
       plugins:{{tooltip:{{callbacks:{{
         label: ctx => `${{ctx.dataset.label}}: ${{ctx.parsed.y.toFixed(2)}} min`
       }}}}}}
+    }}
+  }});
+}}
+
+// === Radar chart ===
+{{
+  new Chart(document.getElementById('ch_radar'), {{
+    type:'radar',
+    data:{{
+      labels: RD.axes,
+      datasets: RD.machines.map((m,i) => ({{
+        label: m.label, data: m.values,
+        borderColor: COLORS[i % COLORS.length],
+        backgroundColor: COLORS[i % COLORS.length] + '33',
+        pointBackgroundColor: COLORS[i % COLORS.length],
+      }}))
+    }},
+    options:{{
+      scales:{{r:{{min:0,max:100,ticks:{{stepSize:25}}}}}},
+      plugins:{{legend:{{position:'top'}}}}
     }}
   }});
 }}

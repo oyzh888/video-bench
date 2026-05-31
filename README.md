@@ -27,6 +27,25 @@ then `python3 report.py` produces a side-by-side HTML report.
 All clips are **synthetically generated** by ffmpeg `testsrc2`, so there's no
 asset download and every machine runs the exact same input.
 
+## Scoring (TL;DR)
+
+Each machine gets a **0–100 composite score** + tier (S/A/B/C/D), built from 6
+weighted dimensions:
+
+| Dimension | Weight | 100 pts | 0 pts |
+|---|---|---|---|
+| CPU encoding (1080p x264 medium) | 25% | 10× realtime | 1× realtime |
+| Parallel throughput | 25% | 60 videos/min | 5 videos/min |
+| GPU encode (NVENC) | 15% | 50× realtime | unavailable |
+| Encoding quality (PSNR @ 4 Mbps) | 10% | 42 dB | 35 dB |
+| Storage I/O | 10% | 5 GB/s read + 2 GB/s write | 100 MB/s |
+| Editing responsiveness | 15% | 0.5s 3-clip export | 5s |
+
+**Tier interpretation:** S (90+) top-tier production · A (75+) strong batch
+machine · B (60+) single-creator solid · C (40+) usable but slow · D (<40)
+underpowered for video. References fixed → single-machine runs are still
+meaningful, multi-machine just sorts.
+
 ## Live comparison dashboard
 
 Auto-published to GitHub Pages on every push to `results/`:
