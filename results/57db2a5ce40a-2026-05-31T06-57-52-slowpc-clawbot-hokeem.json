@@ -3,7 +3,7 @@
   "hostname": "57db2a5ce40a",
   "started_at": "2026-05-31T06-57-52",
   "quick": false,
-  "label": "codex-57db2a5ce40a",
+  "label": "slowpc-clawbot-hokeem",
   "probe": {
     "platform": "Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.36",
     "python": "3.11.2",
