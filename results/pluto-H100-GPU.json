@@ -1,0 +1,295 @@
+{
+  "schema_version": 1,
+  "hostname": "pluto-prod-zouyang-xpu-1gpu-2-0",
+  "started_at": "2026-05-31T01-00-00",
+  "quick": false,
+  "label": "H100-GPU",
+  "probe": {
+    "platform": "Linux-6.12.53-69.119.amzn2023.x86_64-x86_64-with-glibc2.35",
+    "python": "3.10.12",
+    "cpu": {
+      "arch": "x86_64",
+      "cores": 192,
+      "model": "AMD EPYC 7R13 Processor",
+      "physical_cores": 48
+    },
+    "mem": {
+      "total_gb": 2000.0
+    },
+    "gpus": [
+      {
+        "name": "NVIDIA H100 80GB HBM3",
+        "driver": "580.95.05",
+        "memory": "81559 MiB",
+        "compute_cap": "9.0"
+      }
+    ],
+    "ffmpeg": {
+      "version": "ffmpeg version 6.1.1 Copyright (c) 2000-2023 the FFmpeg developers",
+      "encoders": [
+        "libx264",
+        "h264_nvenc",
+        "hevc_nvenc"
+      ],
+      "nvenc": false,
+      "nvdec": true
+    },
+    "disk": {
+      "tmpdir": "/mnt/localssd/colligo_cache/tmp",
+      "write_MBps": 1052.1,
+      "read_MBps": 4966.6,
+      "size_mb_tested": 256
+    }
+  },
+  "single": {
+    "source_clip_seconds": 30,
+    "tests": {
+      "x264_1080p_medium": {
+        "ok": true,
+        "wall_s": 7.622,
+        "src_duration_s": 30.0,
+        "speed_x_realtime": 3.94,
+        "ffmpeg_fps": null,
+        "note": "NVDEC + libx264 hybrid"
+      },
+      "x264_1080p_veryfast": {
+        "ok": true,
+        "wall_s": 2.289,
+        "src_duration_s": 30.0,
+        "speed_x_realtime": 13.1,
+        "ffmpeg_speed": 14.1,
+        "ffmpeg_fps": 424.0,
+        "output_bytes": 20623660,
+        "cmd": "/opt/ffmpeg/bin/ffmpeg -y -hide_banner -i /sensei-fs-3/users/zouyang/workspace/code/video-bench/assets/src_1080p_30s.mp4 -c:v libx264 -preset veryfast -crf 23 -c:a copy /sensei-fs-3/users/zouyang/workspace/code/video-bench/assets/out_single/x264_1080p_veryfast.mp4",
+        "error": null
+      },
+      "x264_4k_to_1080p": {
+        "ok": true,
+        "wall_s": 16.733,
+        "src_duration_s": 30.0,
+        "speed_x_realtime": 1.79,
+        "ffmpeg_fps": null,
+        "note": "NVDEC + libx264 hybrid"
+      },
+      "nvdec_h264_4k_to_1080p": {
+        "ok": true,
+        "wall_s": 13.847,
+        "src_duration_s": 30.0,
+        "speed_x_realtime": 2.17,
+        "ffmpeg_speed": 2.28,
+        "ffmpeg_fps": 69.0,
+        "output_bytes": 7789564,
+        "cmd": "/opt/ffmpeg/bin/ffmpeg -y -hide_banner -hwaccel cuda -i /sensei-fs-3/users/zouyang/workspace/code/video-bench/assets/src_2160p_30s.mp4 -vf scale=1920:1080 -c:v libx264 -preset veryfast -crf 23 -c:a copy /sensei-fs-3/users/zouyang/workspace/code/video-bench/assets/out_single/nvdec_h264_4k_to_1080p.mp4",
+        "error": null
+      },
+      "nvdec_h264_1080p_reencode": {
+        "ok": true,
+        "wall_s": 4.58,
+        "src_duration_s": 30.0,
+        "speed_x_realtime": 6.55,
+        "ffmpeg_speed": 8.08,
+        "ffmpeg_fps": 242.0,
+        "output_bytes": 20623660,
+        "cmd": "/opt/ffmpeg/bin/ffmpeg -y -hide_banner -hwaccel cuda -i /sensei-fs-3/users/zouyang/workspace/code/video-bench/assets/src_1080p_30s.mp4 -c:v libx264 -preset veryfast -crf 23 -c:a copy /sensei-fs-3/users/zouyang/workspace/code/video-bench/assets/out_single/nvdec_h264_1080p_reencode.mp4",
+        "error": null
+      },
+      "decode_only_4k": {
+        "ok": true,
+        "wall_s": 2.419,
+        "src_duration_s": 30.0,
+        "speed_x_realtime": 12.4,
+        "ffmpeg_fps": 415.0,
+        "error": null
+      },
+      "decode_only_4k_nvdec": {
+        "ok": true,
+        "wall_s": 11.219,
+        "src_duration_s": 30.0,
+        "speed_x_realtime": 2.67,
+        "ffmpeg_fps": 87.0,
+        "error": null
+      }
+    }
+  },
+  "concurrent": {
+    "source_clip_seconds": 20,
+    "cpu": [
+      {
+        "n_parallel": 12,
+        "vcodec": "libx264+NVDEC",
+        "wall_s": 53.751,
+        "ok_count": 12,
+        "videos_per_minute": 13.4,
+        "aggregate_speed_x_realtime": 6.7
+      }
+    ],
+    "nvenc": []
+  },
+  "scenarios": {
+    "edit_export_3clip": {
+      "ok": true,
+      "wall_s": 2.231,
+      "output_bytes": 9779418,
+      "error": null
+    },
+    "thumbnail_grid_1fps": {
+      "ok": true,
+      "wall_s": 0.567,
+      "thumbnails": 30,
+      "thumbs_per_sec": 52.9,
+      "error": null
+    },
+    "subtitle_burn": {
+      "ok": true,
+      "wall_s": 3.003,
+      "speed_x_realtime": 9.99,
+      "error": null
+    }
+  },
+  "quality": {
+    "target_bitrate_kbps": 4000,
+    "tests": {
+      "libx264_ultrafast": {
+        "ok": true,
+        "encode_wall_s": 0.866,
+        "psnr_db": 39.697876,
+        "ssim": 0.984733,
+        "output_bytes": 10032546
+      },
+      "libx264_veryfast": {
+        "ok": true,
+        "encode_wall_s": 1.671,
+        "psnr_db": 41.137189,
+        "ssim": 0.99142,
+        "output_bytes": 9759062
+      },
+      "libx264_medium": {
+        "ok": true,
+        "encode_wall_s": 3.057,
+        "psnr_db": 41.829214,
+        "ssim": 0.991734,
+        "output_bytes": 9787659
+      }
+    }
+  },
+  "total_wall_s": 153.6,
+  "optimized": {
+    "feasible": true,
+    "reason": "192 cores across 12 L3 caches \u2014 CCD pinning should help",
+    "topology": {
+      "linux": true,
+      "sockets": 2,
+      "cores_per_socket": 48,
+      "threads_per_core": 2,
+      "total_logical": 192,
+      "l3_count": 12
+    },
+    "tests": {
+      "baseline_1proc_16threads": {
+        "n_procs": 1,
+        "threads_per": 16,
+        "pinned": false,
+        "wall_s": 5.618,
+        "aggregate_speed_x_realtime": 5.34,
+        "videos_per_minute": 10.68,
+        "per_video_wall_s": 5.618
+      },
+      "pinned_4procs_8threads": {
+        "n_procs": 4,
+        "threads_per": 8,
+        "pinned": true,
+        "wall_s": 13.459,
+        "aggregate_speed_x_realtime": 8.92,
+        "videos_per_minute": 17.83,
+        "per_video_wall_s": 13.459
+      },
+      "pinned_12procs_8threads": {
+        "n_procs": 12,
+        "threads_per": 8,
+        "pinned": true,
+        "wall_s": 42.021,
+        "aggregate_speed_x_realtime": 8.57,
+        "videos_per_minute": 17.13,
+        "per_video_wall_s": 42.021
+      },
+      "pinned_24procs_8threads": {
+        "n_procs": 24,
+        "threads_per": 8,
+        "pinned": true,
+        "wall_s": 111.331,
+        "aggregate_speed_x_realtime": 6.47,
+        "videos_per_minute": 12.93,
+        "per_video_wall_s": 111.331
+      },
+      "unpinned_12procs_8threads": {
+        "n_procs": 12,
+        "threads_per": 8,
+        "pinned": false,
+        "wall_s": 49.725,
+        "aggregate_speed_x_realtime": 7.24,
+        "videos_per_minute": 14.48,
+        "per_video_wall_s": 49.725
+      }
+    },
+    "headline_speedup_x": 1.67,
+    "best_aggregate_x_realtime": 8.92
+  },
+  "optimized_gpu": {
+    "feasible": true,
+    "reason": "NVDEC + multi-core CPU available",
+    "topology": {
+      "linux": true,
+      "sockets": 2,
+      "cores_per_socket": 48,
+      "threads_per_core": 2,
+      "total_logical": 192,
+      "l3_count": 12
+    },
+    "tests": {
+      "nvdec_1080p_x12_pinned": {
+        "n_procs": 12,
+        "threads_per": 8,
+        "pinned": true,
+        "hwaccel": "cuda",
+        "filter": null,
+        "wall_s": 53.751,
+        "aggregate_speed_x_realtime": 6.7,
+        "videos_per_minute": 13.4,
+        "ok_count": 12
+      },
+      "nvdec_4k_to_1080p_x12_pinned": {
+        "n_procs": 12,
+        "threads_per": 8,
+        "pinned": true,
+        "hwaccel": "cuda",
+        "filter": "scale=1920:1080",
+        "wall_s": 61.488,
+        "aggregate_speed_x_realtime": 5.85,
+        "videos_per_minute": 11.71,
+        "ok_count": 12
+      },
+      "nvdec_1080p_single": {
+        "n_procs": 1,
+        "threads_per": 16,
+        "pinned": false,
+        "hwaccel": "cuda",
+        "filter": null,
+        "wall_s": 7.622,
+        "aggregate_speed_x_realtime": 3.94,
+        "videos_per_minute": 7.87,
+        "ok_count": 1
+      },
+      "nvdec_4k_to_1080p_single": {
+        "n_procs": 1,
+        "threads_per": 16,
+        "pinned": false,
+        "hwaccel": "cuda",
+        "filter": "scale=1920:1080",
+        "wall_s": 16.733,
+        "aggregate_speed_x_realtime": 1.79,
+        "videos_per_minute": 3.59,
+        "ok_count": 1
+      }
+    }
+  }
+}
