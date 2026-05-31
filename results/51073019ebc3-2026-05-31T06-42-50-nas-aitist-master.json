@@ -3,7 +3,7 @@
   "hostname": "51073019ebc3",
   "started_at": "2026-05-31T06-42-50",
   "quick": false,
-  "label": "codex-container",
+  "label": "nas-aitist-master",
   "probe": {
     "platform": "Linux-6.12.30+-x86_64-with-glibc2.41",
     "python": "3.14.3",
