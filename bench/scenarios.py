@@ -4,10 +4,14 @@ import json, sys, time, subprocess
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from lib.common import FFMPEG, gen_clip, run, clip_duration, parse_ffmpeg_speed
+from lib.common import FFMPEG, gen_clip, clip_duration, have_videotoolbox
 
 
-def cut_concat_encode(src: Path, out_dir: Path) -> dict:
+def cut_concat_encode(src: Path, out_dir: Path, *, vcodec: str = "libx264",
+                      preset: str | None = "medium",
+                      crf: int | None = 23,
+                      bitrate: str | None = None,
+                      name: str = "edit_export") -> dict:
     """Simulate an editor exporting a 3-clip cut."""
     out_dir.mkdir(parents=True, exist_ok=True)
     parts = []
@@ -25,12 +29,18 @@ def cut_concat_encode(src: Path, out_dir: Path) -> dict:
     listfile = out_dir / "list.txt"
     listfile.write_text("\n".join(f"file '{p}'" for p in parts))
 
-    final = out_dir / "edit_export.mp4"
+    final = out_dir / f"{name}.mp4"
     t0 = time.perf_counter()
     cmd = [FFMPEG, "-y", "-hide_banner", "-loglevel", "error",
            "-f", "concat", "-safe", "0", "-i", str(listfile),
-           "-c:v", "libx264", "-preset", "medium", "-crf", "23",
-           "-c:a", "aac", "-b:a", "128k", str(final)]
+           "-c:v", vcodec]
+    if preset:
+        cmd += ["-preset", preset]
+    if crf is not None:
+        cmd += ["-crf", str(crf)]
+    if bitrate:
+        cmd += ["-b:v", bitrate]
+    cmd += ["-c:a", "aac", "-b:a", "128k", str(final)]
     p = subprocess.run(cmd, capture_output=True, text=True)
     dt = time.perf_counter() - t0
     return {
@@ -87,11 +97,17 @@ def main(quick: bool = False) -> dict:
     secs = 20 if quick else 30
     src = gen_clip(f"src_1080p_{secs}s.mp4", secs, 1920, 1080, 30)
     out_dir = src.parent / "out_scenario"
-    return {
+    result = {
         "edit_export_3clip": cut_concat_encode(src, out_dir / "edit"),
         "thumbnail_grid_1fps": thumbnail_grid(src, out_dir / "thumbs"),
         "subtitle_burn": subtitle_burn(src, out_dir / "subs"),
     }
+    if have_videotoolbox():
+        result["edit_export_3clip_videotoolbox"] = cut_concat_encode(
+            src, out_dir / "edit_videotoolbox",
+            vcodec="h264_videotoolbox", preset=None, crf=None,
+            bitrate="8M", name="edit_export_videotoolbox")
+    return result
 
 
 if __name__ == "__main__":

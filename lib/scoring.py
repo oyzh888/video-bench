@@ -219,9 +219,21 @@ def score_storage(run: dict) -> dict:
 def score_scenarios(run: dict) -> dict:
     """Edit-export responsiveness. 30s 3-clip export: 0.5s → 100, 5s → 0."""
     edit = _get(run, "scenarios", "edit_export_3clip", "wall_s")
-    score = _scale_inverse(edit, 0.5, 5.0) if edit else None
-    return {"score": score, "raw": edit, "raw_unit": "sec wall",
-            "label": "Editing responsiveness (3-clip export)"}
+    vt_edit = _get(run, "scenarios", "edit_export_3clip_videotoolbox", "wall_s")
+    candidates = [(edit, "CPU")] if edit else []
+    if vt_edit:
+        candidates.append((vt_edit, "VideoToolbox"))
+    if not candidates:
+        return {"score": None, "raw": None, "raw_unit": "sec wall",
+                "label": "Editing responsiveness (3-clip export)"}
+    best, mode = min(candidates, key=lambda x: x[0])
+    score = _scale_inverse(best, 0.5, 5.0)
+    note = None
+    if edit and vt_edit:
+        note = f"Best path: {mode} ({best:.2f}s); CPU was {edit:.2f}s"
+    return {"score": score, "raw": f"{best:.3f} ({mode})", "raw_unit": "sec wall",
+            "label": "Editing responsiveness (3-clip export)",
+            "note": note}
 
 
 # ----- Composite ---------------------------------------------------------
