@@ -31,18 +31,38 @@ def load_all() -> list[dict]:
     return runs
 
 
+def has_videotoolbox_measurements(run: dict) -> bool:
+    tests = run.get("single", {}).get("tests", {}) or {}
+    scenarios = run.get("scenarios", {}) or {}
+    concurrent = run.get("concurrent", {}) or {}
+    return (
+        any(k.startswith("videotoolbox_") or k.endswith("_videotoolbox") for k in tests)
+        or "edit_export_3clip_videotoolbox" in scenarios
+        or bool(concurrent.get("videotoolbox"))
+    )
+
+
+def display_label(run: dict) -> str:
+    if run.get("label"):
+        return run["label"]
+    if (run.get("hostname") == "MacBookPro.attlocal.net"
+            and not has_videotoolbox_measurements(run)):
+        return "MacBookPro-M1Max-CPU-old"
+    return run.get("hostname", "?")
+
+
 def label(run: dict) -> str:
     base = run.get("hostname", "?")
-    if run.get("label"):
-        base += f" / {run['label']}"
+    dl = display_label(run)
+    if dl != base:
+        base += f" / {dl}"
     if run.get("quick"):
         base += " [quick]"
     return base
 
 
 def short_label(run: dict) -> str:
-    if run.get("label"): return run["label"]
-    return run.get("hostname", "?")[:20]
+    return display_label(run)[:36]
 
 
 def cell(v) -> str:
@@ -92,8 +112,11 @@ def verdict_card(run: dict) -> str:
     encoders = run.get("probe", {}).get("ffmpeg", {}).get("encoders", []) or []
     if vt is None:
         vt = "h264_videotoolbox" in encoders
-    if vt:
+    vt_measured = has_videotoolbox_measurements(run)
+    if vt and vt_measured:
         gpu_str = "✅ Apple VideoToolbox"
+    elif vt:
+        gpu_str = "🟡 VideoToolbox available, not benched"
     elif nvenc and nvdec:
         gpu_str = "✅ NVENC + NVDEC"
     elif nvenc:
@@ -341,6 +364,7 @@ def render(runs: list[dict]) -> str:
         row("GPU",           [(r.get("probe", {}).get("gpus") or [{"name":"—"}])[0]["name"] for r in runs]),
         row("NVENC working", [r.get("probe", {}).get("ffmpeg", {}).get("nvenc") for r in runs]),
         row("VideoToolbox working", [r.get("probe", {}).get("ffmpeg", {}).get("videotoolbox") for r in runs]),
+        row("VideoToolbox measured", [has_videotoolbox_measurements(r) for r in runs]),
         row("Disk read MB/s",  [r.get("probe", {}).get("disk", {}).get("read_MBps") for r in runs]),
         row("Disk write MB/s", [r.get("probe", {}).get("disk", {}).get("write_MBps") for r in runs]),
     ]
