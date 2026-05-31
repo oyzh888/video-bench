@@ -4,7 +4,7 @@ import json, os, platform, re, shutil, subprocess, sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from lib.common import FFMPEG, have, have_nvenc, have_nvdec, run
+from lib.common import FFMPEG, have, have_nvenc, have_nvdec, have_videotoolbox, run
 
 
 def cpu_info() -> dict:
@@ -44,6 +44,28 @@ def mem_info() -> dict:
 
 
 def gpu_info() -> list[dict]:
+    if platform.system() == "Darwin":
+        try:
+            out = subprocess.run(["system_profiler", "SPDisplaysDataType"],
+                                 capture_output=True, text=True, timeout=10).stdout
+            gpus = []
+            current: dict | None = None
+            for raw in out.splitlines():
+                line = raw.strip()
+                if raw.startswith("    ") and not raw.startswith("      ") and line.endswith(":"):
+                    if current:
+                        gpus.append(current)
+                    current = {"name": line[:-1]}
+                elif current and line.startswith("Total Number of Cores:"):
+                    current["cores"] = line.split(":", 1)[1].strip()
+                elif current and line.startswith("Metal Support:"):
+                    current["metal"] = line.split(":", 1)[1].strip()
+            if current:
+                gpus.append(current)
+            return gpus
+        except Exception:
+            return []
+
     if not have("nvidia-smi"):
         return []
     out = subprocess.run(
@@ -77,7 +99,8 @@ def ffmpeg_info() -> dict:
         if re.search(rf"\b{re.escape(codec)}\b", enc):
             encoders.append(codec)
     return {"version": ver, "encoders": encoders,
-            "nvenc": have_nvenc(), "nvdec": have_nvdec()}
+            "nvenc": have_nvenc(), "nvdec": have_nvdec(),
+            "videotoolbox": have_videotoolbox()}
 
 
 def disk_info() -> dict:

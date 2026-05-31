@@ -6,7 +6,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from lib.common import (FFMPEG, gen_clip, run, clip_duration,
                         parse_ffmpeg_speed, parse_ffmpeg_fps,
-                        have_nvenc, have_nvdec, have_encoder)
+                        have_nvenc, have_nvdec, have_encoder,
+                        have_videotoolbox)
 
 # Two source clips: 1080p30 and 4K30, both 30 seconds.
 def assets(quick: bool):
@@ -29,7 +30,7 @@ def transcode(src: Path, out: Path, vcodec: str, extra: list[str] | None = None,
     cmd += ["-c:v", vcodec]
     if preset:
         cmd += ["-preset", preset]
-    if crf is not None and "nvenc" not in vcodec:
+    if crf is not None and "nvenc" not in vcodec and "videotoolbox" not in vcodec:
         cmd += ["-crf", str(crf)]
     elif "nvenc" in vcodec:
         cmd += ["-cq", str(crf if crf is not None else 23), "-b:v", "0"]
@@ -91,6 +92,21 @@ def main(quick: bool = False) -> dict:
         record("nvenc_4k_to_1080p", src=src_4k, vcodec="h264_nvenc",
                preset="p4", crf=23, filters=["scale=1920:1080"])
 
+    # Apple Silicon / macOS hardware video path. VideoToolbox maps to the
+    # media engine rather than NVIDIA-style NVENC, and does not accept x264
+    # preset/crf knobs, so use fixed bitrate settings.
+    if have_videotoolbox():
+        record("videotoolbox_h264_1080p", src=src_1080,
+               vcodec="h264_videotoolbox", preset=None, crf=None,
+               extra=["-b:v", "8M"])
+        if have_encoder("hevc_videotoolbox"):
+            record("videotoolbox_hevc_1080p", src=src_1080,
+                   vcodec="hevc_videotoolbox", preset=None, crf=None,
+                   extra=["-b:v", "6M"])
+        record("videotoolbox_h264_4k_to_1080p", src=src_4k,
+               vcodec="h264_videotoolbox", preset=None, crf=None,
+               filters=["scale=1920:1080"], extra=["-b:v", "8M"])
+
     # Decode-only (CPU). Some minimal ffmpeg builds disable
     # `wrapped_avframe`, so we force rawvideo for the null sink.
     cmd = [FFMPEG, "-y", "-hide_banner",
@@ -112,6 +128,18 @@ def main(quick: bool = False) -> dict:
                "-i", str(src_4k), "-c:v", "rawvideo", "-an", "-f", "null", "-"]
         rc, log, dt = run(cmd, timeout=600)
         results["tests"]["decode_only_4k_nvdec"] = {
+            "ok": rc == 0,
+            "wall_s": round(dt, 3),
+            "src_duration_s": round(src_dur, 3),
+            "speed_x_realtime": round(src_dur / dt, 2) if dt else None,
+            "ffmpeg_fps": parse_ffmpeg_fps(log),
+            "error": None if rc == 0 else log[-400:],
+        }
+    if have_videotoolbox():
+        cmd = [FFMPEG, "-y", "-hide_banner", "-hwaccel", "videotoolbox",
+               "-i", str(src_4k), "-c:v", "rawvideo", "-an", "-f", "null", "-"]
+        rc, log, dt = run(cmd, timeout=600)
+        results["tests"]["decode_only_4k_videotoolbox"] = {
             "ok": rc == 0,
             "wall_s": round(dt, 3),
             "src_duration_s": round(src_dur, 3),

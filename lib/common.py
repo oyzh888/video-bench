@@ -61,6 +61,39 @@ def have_encoder(name: str) -> bool:
         return False
 
 
+_videotoolbox_cache: Optional[bool] = None
+
+def have_videotoolbox() -> bool:
+    """True if Apple VideoToolbox h264 encoding works end-to-end.
+
+    Listing h264_videotoolbox is not enough: some ffmpeg builds expose the
+    encoder but fail to open a hardware session. Probe a tiny encode so the
+    benchmark only credits useful acceleration.
+    """
+    global _videotoolbox_cache
+    if _videotoolbox_cache is not None:
+        return _videotoolbox_cache
+    try:
+        out = subprocess.run([FFMPEG, "-hide_banner", "-hwaccels"],
+                             capture_output=True, text=True, timeout=10)
+        if "videotoolbox" not in out.stdout:
+            _videotoolbox_cache = False
+            return False
+        if not have_encoder("h264_videotoolbox"):
+            _videotoolbox_cache = False
+            return False
+        probe = subprocess.run(
+            [FFMPEG, "-hide_banner", "-loglevel", "error", "-y",
+             "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=30:duration=0.5",
+             "-c:v", "h264_videotoolbox", "-b:v", "1M", "-f", "null", "-"],
+            capture_output=True, text=True, timeout=20)
+        _videotoolbox_cache = probe.returncode == 0
+        return _videotoolbox_cache
+    except Exception:
+        _videotoolbox_cache = False
+        return False
+
+
 _nvdec_cache: Optional[bool] = None
 
 def have_nvdec() -> bool:

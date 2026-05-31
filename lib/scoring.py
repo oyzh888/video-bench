@@ -65,7 +65,7 @@ def score_cpu_encode(run: dict) -> dict:
 
 
 def score_parallel(run: dict) -> dict:
-    """Best videos/min observed across the concurrent CPU sweep. 5 → 0, 60 → 100.
+    """Best videos/min observed across measured concurrent sweeps. 5 → 0, 60 → 100.
 
     Also detects the 'big-server flat-curve' anti-pattern: when N=1 → N=8 gives
     less than +30% throughput, the machine is being capped by ffmpeg's
@@ -74,10 +74,14 @@ def score_parallel(run: dict) -> dict:
     single ffmpeg instances and is genuinely surprising.
     """
     cpu = _get(run, "concurrent", "cpu", default=[]) or []
-    if not cpu:
+    nvenc = _get(run, "concurrent", "nvenc", default=[]) or []
+    vt = _get(run, "concurrent", "videotoolbox", default=[]) or []
+    entries = [(e, "CPU") for e in cpu] + [(e, "NVENC") for e in nvenc] + [(e, "VideoToolbox") for e in vt]
+    if not entries:
         return {"score": None, "raw": None, "raw_unit": "videos / min",
                 "label": "Parallel throughput (peak)"}
-    best = max((e.get("videos_per_minute") or 0) for e in cpu)
+    best_entry, best_kind = max(entries, key=lambda x: x[0].get("videos_per_minute") or 0)
+    best = best_entry.get("videos_per_minute") or 0
     score = _scale(best, 5.0, 60.0)
 
     # Detect flat-curve anti-pattern
@@ -93,7 +97,7 @@ def score_parallel(run: dict) -> dict:
                     f"{cores}-core box — ffmpeg threading or NUMA is the cap, "
                     f"not cores. Single-stream speed matters more than core count here.")
 
-    return {"score": score, "raw": round(best, 2),
+    return {"score": score, "raw": f"{round(best, 2)} ({best_kind})",
             "raw_unit": "videos / min",
             "label": "Parallel throughput (peak)",
             "note": note}
@@ -103,11 +107,12 @@ def score_gpu(run: dict) -> dict:
     """GPU acceleration score — credits whichever GPU path actually works
     AND provides speedup vs CPU on this box.
 
-    Three cases (in priority order):
+    Four cases (in priority order):
       1. NVENC works → score by NVENC ×realtime (1080p), 50× = 100.
-      2. NVDEC works AND beats CPU decode → partial credit by speedup ratio,
+      2. Apple VideoToolbox works → score by VideoToolbox H.264 ×realtime.
+      3. NVDEC works AND beats CPU decode → partial credit by speedup ratio,
          capped at 50 (NVDEC alone is half a video-acceleration story).
-      3. No working GPU acceleration → 0.
+      4. No working GPU acceleration → 0.
 
     Why this matters: H100/H200 ship without NVENC silicon (compute-only
     SKUs) but still have NVDEC. On big-CPU boxes, NVDEC often loses to
@@ -116,13 +121,43 @@ def score_gpu(run: dict) -> dict:
     """
     nvenc_works = _get(run, "probe", "ffmpeg", "nvenc")
     nvdec_works = _get(run, "probe", "ffmpeg", "nvdec")
+    vt_works = _get(run, "probe", "ffmpeg", "videotoolbox")
+    encoders = _get(run, "probe", "ffmpeg", "encoders", default=[]) or []
+    if vt_works is None:
+        vt_works = "h264_videotoolbox" in encoders
     nvenc_speed = _get(run, "single", "tests", "nvenc_h264_1080p", "speed_x_realtime")
+    vt_speed = _get(run, "single", "tests", "videotoolbox_h264_1080p", "speed_x_realtime")
 
     if nvenc_works and nvenc_speed:
         return {"score": _scale(nvenc_speed, 0.0, 50.0),
                 "raw": nvenc_speed, "raw_unit": "× realtime (NVENC)",
                 "label": "GPU encode (NVENC h264)",
                 "mode": "nvenc"}
+
+    if vt_works and vt_speed:
+        cpu_speed = _get(run, "single", "tests", "x264_1080p_medium", "speed_x_realtime")
+        note = None
+        if cpu_speed:
+            note = f"VideoToolbox is {vt_speed / cpu_speed:.1f}× faster than x264 medium"
+        return {"score": _scale(vt_speed, 0.0, 50.0),
+                "raw": vt_speed, "raw_unit": "× realtime (VideoToolbox)",
+                "label": "GPU encode (Apple VideoToolbox h264)",
+                "mode": "videotoolbox",
+                "note": note}
+
+    vt_decode = _get(run, "single", "tests", "decode_only_4k_videotoolbox", "speed_x_realtime")
+    cpu_4k = _get(run, "single", "tests", "decode_only_4k", "speed_x_realtime")
+    if vt_works and vt_decode and cpu_4k:
+        speedup = vt_decode / cpu_4k
+        s = _scale(speedup, 1.0, 4.0)
+        score = (s or 0) * 0.5
+        note = ("VideoToolbox decode works but is slower than CPU"
+                if speedup < 1.0 else f"VideoToolbox decode gives {speedup:.1f}× speedup over CPU")
+        return {"score": score, "raw": f"{vt_decode:.0f}× rt (vs CPU {cpu_4k:.0f}×)",
+                "raw_unit": "× realtime (VideoToolbox decode)",
+                "label": "GPU acceleration (Apple VideoToolbox decode)",
+                "mode": "videotoolbox_decode",
+                "note": note}
 
     # NVDEC fallback: compare 4K decode-only NVDEC vs CPU
     nvdec_4k = _get(run, "single", "tests", "decode_only_4k_nvdec", "speed_x_realtime")
@@ -145,6 +180,11 @@ def score_gpu(run: dict) -> dict:
         return {"score": 0.0, "raw": None, "raw_unit": "—",
                 "label": "GPU acceleration",
                 "note": "NVDEC available but no benchmark data"}
+
+    if vt_works:
+        return {"score": 0.0, "raw": None, "raw_unit": "—",
+                "label": "GPU acceleration",
+                "note": "VideoToolbox available but no benchmark data"}
 
     return {"score": 0.0, "raw": None, "raw_unit": "—",
             "label": "GPU acceleration",

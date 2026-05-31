@@ -88,7 +88,13 @@ def verdict_card(run: dict) -> str:
     gpu = gpus[0]["name"] if gpus else "no GPU"
     nvenc = run.get("probe", {}).get("ffmpeg", {}).get("nvenc")
     nvdec = run.get("probe", {}).get("ffmpeg", {}).get("nvdec")
-    if nvenc and nvdec:
+    vt = run.get("probe", {}).get("ffmpeg", {}).get("videotoolbox")
+    encoders = run.get("probe", {}).get("ffmpeg", {}).get("encoders", []) or []
+    if vt is None:
+        vt = "h264_videotoolbox" in encoders
+    if vt:
+        gpu_str = "✅ Apple VideoToolbox"
+    elif nvenc and nvdec:
         gpu_str = "✅ NVENC + NVDEC"
     elif nvenc:
         gpu_str = "✅ NVENC only"
@@ -261,6 +267,7 @@ def calculator_data(runs: list[dict]) -> list[dict]:
                 "x264_4k_down":  tests.get("x264_4k_to_1080p", {}).get("speed_x_realtime"),
                 "x265_medium":   tests.get("x265_1080p_medium", {}).get("speed_x_realtime"),
                 "nvenc_h264":    tests.get("nvenc_h264_1080p", {}).get("speed_x_realtime"),
+                "videotoolbox_h264": tests.get("videotoolbox_h264_1080p", {}).get("speed_x_realtime"),
             },
             "parallel_efficiency": parallel_efficiency(r) or 1.0,
         })
@@ -274,7 +281,9 @@ def chart_data(runs: list[dict]) -> dict:
     # Single render time (lower=better) — bar grouped by test
     single_keys = ["x264_1080p_medium", "x264_1080p_veryfast",
                    "x264_4k_to_1080p", "x265_1080p_medium",
-                   "nvenc_h264_1080p", "decode_only_4k"]
+                   "nvenc_h264_1080p", "videotoolbox_h264_1080p",
+                   "videotoolbox_hevc_1080p", "videotoolbox_h264_4k_to_1080p",
+                   "decode_only_4k", "decode_only_4k_videotoolbox"]
     single_speed = {}
     for k in single_keys:
         single_speed[k] = [
@@ -331,6 +340,7 @@ def render(runs: list[dict]) -> str:
         row("RAM (GB)",      [r.get("probe", {}).get("mem", {}).get("total_gb") for r in runs]),
         row("GPU",           [(r.get("probe", {}).get("gpus") or [{"name":"—"}])[0]["name"] for r in runs]),
         row("NVENC working", [r.get("probe", {}).get("ffmpeg", {}).get("nvenc") for r in runs]),
+        row("VideoToolbox working", [r.get("probe", {}).get("ffmpeg", {}).get("videotoolbox") for r in runs]),
         row("Disk read MB/s",  [r.get("probe", {}).get("disk", {}).get("read_MBps") for r in runs]),
         row("Disk write MB/s", [r.get("probe", {}).get("disk", {}).get("write_MBps") for r in runs]),
     ]
@@ -431,7 +441,7 @@ Tiers: <span class="pill" style="background:#a855f7">S</span> 90+ ·
 <div class="charts">
   <div class="chartbox">
     <h3>Single-clip encoding speed (×realtime, higher=better)</h3>
-    <div class="desc">How fast each preset processes one 30s 1080p clip. NVENC bars only appear if GPU encode actually works on the box.</div>
+    <div class="desc">How fast each preset processes one 30s 1080p clip. Hardware bars appear when NVENC or Apple VideoToolbox actually works on the box.</div>
     <canvas id="ch_single" height="260"></canvas>
   </div>
   <div class="chartbox">
@@ -463,6 +473,7 @@ Tiers: <span class="pill" style="background:#a855f7">S</span> 90+ ·
       <option value="x264_4k_down">4K → 1080p downscale</option>
       <option value="x265_medium">x265 medium (smaller files)</option>
       <option value="nvenc_h264">NVENC h264 (GPU)</option>
+      <option value="videotoolbox_h264">Apple VideoToolbox h264</option>
     </select>
   </label>
 </div>
@@ -490,7 +501,9 @@ const COLORS = ['#0969da','#cf222e','#1a7f37','#9a6700','#8250df','#bf3989','#0a
 // === Single-clip speed bar chart ===
 {{
   const tests = ['x264_1080p_medium','x264_1080p_veryfast','x264_4k_to_1080p',
-                 'x265_1080p_medium','nvenc_h264_1080p','decode_only_4k'];
+                 'x265_1080p_medium','nvenc_h264_1080p','videotoolbox_h264_1080p',
+                 'videotoolbox_hevc_1080p','videotoolbox_h264_4k_to_1080p',
+                 'decode_only_4k','decode_only_4k_videotoolbox'];
   const haveAny = (k) => CD.single_speed[k] && CD.single_speed[k].some(v => v != null);
   const used = tests.filter(haveAny);
   new Chart(document.getElementById('ch_single'), {{

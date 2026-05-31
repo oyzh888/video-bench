@@ -5,14 +5,19 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from lib.common import (FFMPEG, gen_clip, clip_duration, have_nvenc, have_encoder)
+from lib.common import (FFMPEG, gen_clip, clip_duration, have_nvenc,
+                        have_videotoolbox)
 
 
 def _one_job(src: Path, out: Path, vcodec: str, preset: str, crf: int) -> dict:
     cmd = [FFMPEG, "-y", "-hide_banner", "-loglevel", "error",
-           "-i", str(src), "-c:v", vcodec, "-preset", preset]
+           "-i", str(src), "-c:v", vcodec]
+    if preset:
+        cmd += ["-preset", preset]
     if "nvenc" in vcodec:
         cmd += ["-cq", str(crf), "-b:v", "0"]
+    elif "videotoolbox" in vcodec:
+        cmd += ["-b:v", "8M"]
     else:
         cmd += ["-crf", str(crf)]
     cmd += ["-c:a", "copy", str(out)]
@@ -53,7 +58,7 @@ def main(quick: bool = False) -> dict:
     src = gen_clip(f"src_1080p_{secs}s.mp4", secs, 1920, 1080, 30)
     out_dir = src.parent / "out_concurrent"
     out_dir.mkdir(exist_ok=True)
-    results: dict = {"source_clip_seconds": secs, "cpu": [], "nvenc": []}
+    results: dict = {"source_clip_seconds": secs, "cpu": [], "nvenc": [], "videotoolbox": []}
 
     cpu_levels = [1, 2, 4, 8] if quick else [1, 2, 4, 8, 16]
     for n in cpu_levels:
@@ -67,6 +72,13 @@ def main(quick: bool = False) -> dict:
             results["nvenc"].append(
                 run_concurrent(src, out_dir, n, "h264_nvenc",
                                preset="p4", crf=23))
+
+    if have_videotoolbox():
+        vt_levels = [1, 2] if quick else [1, 2, 4, 8]
+        for n in vt_levels:
+            results["videotoolbox"].append(
+                run_concurrent(src, out_dir, n, "h264_videotoolbox",
+                               preset=None, crf=23))
 
     return results
 
