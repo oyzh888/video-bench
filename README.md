@@ -3,8 +3,12 @@
 Portable benchmark suite to estimate **how good a machine feels for video work** —
 single-clip render time, parallel throughput, and realistic editing scenarios.
 
-Run it on every machine you care about, drop the JSON results into `results/`,
-then `python3 report.py` produces a side-by-side HTML report.
+Run it on every machine you care about, push the JSON results to this repo,
+and the public dashboard auto-rebuilds with your machine added.
+
+**📊 Live dashboard: https://oyzh888.github.io/video-bench/**
+
+**🤖 If you're an AI agent, read [AGENTS.md](./AGENTS.md) — that's the contributing guide.**
 
 ## What it measures
 

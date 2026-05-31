@@ -1,7 +1,8 @@
-results/*.json
-!results/pluto-H100-baseline.json
-!results/sample-*.json
+# Don't commit large generated artifacts
 assets/
 __pycache__/
 *.pyc
 report.html
+
+# DO commit results/*.json — that's the entire point of this repo.
+# Each machine pushes its bench JSON so the dashboard accumulates.
