@@ -1,11 +1,23 @@
 #!/usr/bin/env python3
-"""Build a side-by-side HTML report from results/*.json."""
+"""Build a side-by-side HTML dashboard from results/*.json.
+
+Sections (in order):
+  1. Verdict cards — one per machine, headline answers
+  2. Customer scenarios — concrete batch jobs in minutes
+  3. Charts — single render time, concurrent throughput curves, quality
+  4. Capacity calculator — interactive "how long for N videos × L minutes"
+  5. Raw tables — all numbers
+"""
 from __future__ import annotations
 import json, html, sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 RESULTS = ROOT / "results"
+sys.path.insert(0, str(ROOT))
+from lib.capacity import (capacity_summary, batch_minutes, parallel_efficiency,
+                          max_realtime_streams, best_concurrent_throughput,
+                          single_video_seconds)
 
 
 def load_all() -> list[dict]:
@@ -27,6 +39,11 @@ def label(run: dict) -> str:
     return base
 
 
+def short_label(run: dict) -> str:
+    if run.get("label"): return run["label"]
+    return run.get("hostname", "?")[:20]
+
+
 def cell(v) -> str:
     if v is None:
         return '<td class="na">—</td>'
@@ -44,139 +61,383 @@ def row(name: str, values: list) -> str:
     return f"<tr><td class='m'>{html.escape(name)}</td>" + "".join(cell(v) for v in values) + "</tr>"
 
 
+def fmt_min(v):
+    if v is None: return "—"
+    if v < 1: return f"{v*60:.1f} sec"
+    if v < 60: return f"{v:.1f} min"
+    return f"{v/60:.1f} hr"
+
+
+def fmt_sec(v):
+    if v is None: return "—"
+    if v < 60: return f"{v:.1f} sec"
+    return f"{v/60:.1f} min"
+
+
+def verdict_card(run: dict) -> str:
+    cap = capacity_summary(run)
+    cpu_name = (run.get("probe", {}).get("cpu", {}).get("model") or "?")[:60]
+    cores = run.get("probe", {}).get("cpu", {}).get("cores", "?")
+    ram = run.get("probe", {}).get("mem", {}).get("total_gb", "?")
+    gpus = run.get("probe", {}).get("gpus", [])
+    gpu = gpus[0]["name"] if gpus else "no GPU"
+    nvenc = run.get("probe", {}).get("ffmpeg", {}).get("nvenc")
+    nvenc_str = "✅ NVENC" if nvenc else "❌ NVENC unavailable"
+
+    speed = (run.get("single", {}).get("tests", {})
+             .get("x264_1080p_medium", {}).get("speed_x_realtime"))
+
+    return f"""
+<div class="card">
+  <div class="card-h">{html.escape(short_label(run))}</div>
+  <div class="card-spec">{html.escape(cpu_name)} · {cores}c · {ram}GB · {html.escape(gpu)} · {nvenc_str}</div>
+  <div class="big">{(speed or 0):.1f}× <span class="unit">realtime (1080p x264 medium)</span></div>
+  <table class="kv">
+    <tr><td>100× 1-min YouTube videos (medium)</td><td><b>{fmt_min(cap['scenario_100x_1min_youtube_medium_min'])}</b></td></tr>
+    <tr><td>100× 1-min fast delivery (veryfast)</td><td><b>{fmt_min(cap['scenario_100x_1min_fast_delivery_min'])}</b></td></tr>
+    <tr><td>100× 1-min 4K → 1080p downscale</td><td><b>{fmt_min(cap['scenario_100x_1min_4k_downscale_min'])}</b></td></tr>
+    <tr><td>Single 5-min YouTube clip export</td><td><b>{fmt_sec(cap['scenario_single_5min_export_s'])}</b></td></tr>
+    <tr><td>Single 30-min podcast 1080p export</td><td><b>{fmt_min(cap['scenario_single_30min_export_min'])}</b></td></tr>
+    <tr><td>Single 1-hr long-form export</td><td><b>{fmt_min(cap['scenario_single_60min_export_min'])}</b></td></tr>
+    <tr><td>Concurrent CPU peak throughput</td><td><b>{cap['best_throughput_videos_per_min'] or '—'} videos/min</b></td></tr>
+    <tr><td>Max simultaneous 1080p30 realtime streams</td><td><b>{cap['max_realtime_1080p_streams'] or '—'}</b></td></tr>
+    <tr><td>Parallel scaling efficiency</td><td><b>{cap['parallel_efficiency_x'] or '—'}×</b></td></tr>
+  </table>
+</div>"""
+
+
+def calculator_data(runs: list[dict]) -> list[dict]:
+    """Per-machine inputs for the JS calculator."""
+    out = []
+    for r in runs:
+        tests = r.get("single", {}).get("tests", {})
+        out.append({
+            "label": short_label(r),
+            "hostname": r.get("hostname"),
+            "speed": {
+                "x264_medium":   tests.get("x264_1080p_medium", {}).get("speed_x_realtime"),
+                "x264_veryfast": tests.get("x264_1080p_veryfast", {}).get("speed_x_realtime"),
+                "x264_4k_down":  tests.get("x264_4k_to_1080p", {}).get("speed_x_realtime"),
+                "x265_medium":   tests.get("x265_1080p_medium", {}).get("speed_x_realtime"),
+                "nvenc_h264":    tests.get("nvenc_h264_1080p", {}).get("speed_x_realtime"),
+            },
+            "parallel_efficiency": parallel_efficiency(r) or 1.0,
+        })
+    return out
+
+
+def chart_data(runs: list[dict]) -> dict:
+    """JSON blobs for Chart.js."""
+    labels = [short_label(r) for r in runs]
+
+    # Single render time (lower=better) — bar grouped by test
+    single_keys = ["x264_1080p_medium", "x264_1080p_veryfast",
+                   "x264_4k_to_1080p", "x265_1080p_medium",
+                   "nvenc_h264_1080p", "decode_only_4k"]
+    single_speed = {}
+    for k in single_keys:
+        single_speed[k] = [
+            (r.get("single", {}).get("tests", {}).get(k, {}) or {}).get("speed_x_realtime")
+            for r in runs]
+
+    # Concurrent throughput curve (CPU): N → videos_per_minute
+    conc_curves = []
+    for r in runs:
+        cpu = r.get("concurrent", {}).get("cpu", []) or []
+        conc_curves.append({
+            "label": short_label(r),
+            "points": [(e["n_parallel"], e.get("videos_per_minute"))
+                       for e in sorted(cpu, key=lambda x: x["n_parallel"])],
+        })
+
+    # Quality: PSNR vs encode time (one point per preset, per machine)
+    quality_pts = []
+    for r in runs:
+        for k, v in (r.get("quality", {}).get("tests", {}) or {}).items():
+            if v.get("psnr_db") and v.get("encode_wall_s"):
+                quality_pts.append({
+                    "machine": short_label(r),
+                    "preset": k,
+                    "x": v["encode_wall_s"],
+                    "y": v["psnr_db"],
+                })
+
+    return {
+        "labels": labels,
+        "single_speed": single_speed,
+        "concurrent": conc_curves,
+        "quality": quality_pts,
+    }
+
+
 def render(runs: list[dict]) -> str:
     if not runs:
-        return "<html><body><h1>No results yet.</h1><p>Run <code>./run.sh</code> first.</p></body></html>"
+        return ("<html><body><h1>No results yet.</h1>"
+                "<p>Run <code>./run.sh</code> first, then <code>python3 report.py</code>.</p>"
+                "</body></html>")
 
+    cards = "\n".join(verdict_card(r) for r in runs)
+    cd = chart_data(runs)
+    calc = calculator_data(runs)
+
+    # Raw tables (kept short — main info is in cards/charts)
     labels = [label(r) for r in runs]
-
-    # ---------- Probe ----------
-    def gpu_name(r):
-        gpus = r.get("probe", {}).get("gpus", [])
-        return gpus[0]["name"] if gpus else "—"
-
     probe_rows = [
-        row("Platform",      [r.get("probe", {}).get("platform", "?") for r in runs]),
         row("CPU model",     [r.get("probe", {}).get("cpu", {}).get("model", "?") for r in runs]),
         row("Logical cores", [r.get("probe", {}).get("cpu", {}).get("cores") for r in runs]),
         row("RAM (GB)",      [r.get("probe", {}).get("mem", {}).get("total_gb") for r in runs]),
-        row("GPU",           [gpu_name(r) for r in runs]),
-        row("ffmpeg",        [r.get("probe", {}).get("ffmpeg", {}).get("version", "?").split(" version ")[-1].split(" Copyright")[0] for r in runs]),
-        row("Encoders",      [", ".join(r.get("probe", {}).get("ffmpeg", {}).get("encoders", [])) for r in runs]),
+        row("GPU",           [(r.get("probe", {}).get("gpus") or [{"name":"—"}])[0]["name"] for r in runs]),
+        row("NVENC working", [r.get("probe", {}).get("ffmpeg", {}).get("nvenc") for r in runs]),
+        row("Disk read MB/s",  [r.get("probe", {}).get("disk", {}).get("read_MBps") for r in runs]),
         row("Disk write MB/s", [r.get("probe", {}).get("disk", {}).get("write_MBps") for r in runs]),
-        row("Disk read  MB/s", [r.get("probe", {}).get("disk", {}).get("read_MBps") for r in runs]),
     ]
 
-    # ---------- Single ----------
-    single_keys = sorted({k for r in runs for k in r.get("single", {}).get("tests", {}).keys()})
-    single_rows = []
-    for k in single_keys:
-        single_rows.append(row(f"{k} — wall (s)",
-            [r.get("single", {}).get("tests", {}).get(k, {}).get("wall_s") for r in runs]))
-        single_rows.append(row(f"{k} — × realtime",
-            [r.get("single", {}).get("tests", {}).get(k, {}).get("speed_x_realtime") for r in runs]))
-        single_rows.append(row(f"{k} — fps",
-            [r.get("single", {}).get("tests", {}).get(k, {}).get("ffmpeg_fps") for r in runs]))
+    return f"""<!doctype html>
+<html><head>
+<meta charset="utf-8">
+<title>video-bench dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+       margin:0;background:#f8f9fb;color:#111;font-size:14px}}
+  .wrap{{max-width:1400px;margin:0 auto;padding:24px}}
+  h1{{margin:0 0 4px;font-size:28px}}
+  h2{{margin:32px 0 12px;font-size:20px;border-bottom:2px solid #ddd;padding-bottom:6px}}
+  .sub{{color:#666;font-size:13px;margin-bottom:16px}}
+  .cards{{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:16px}}
+  .card{{background:#fff;border:1px solid #e1e4e8;border-radius:10px;padding:18px;
+         box-shadow:0 1px 3px rgba(0,0,0,0.04)}}
+  .card-h{{font-size:18px;font-weight:700;margin-bottom:4px}}
+  .card-spec{{color:#666;font-size:12px;margin-bottom:10px;line-height:1.4}}
+  .big{{font-size:36px;font-weight:800;color:#0969da;margin:8px 0 14px}}
+  .big .unit{{font-size:13px;color:#666;font-weight:400}}
+  table.kv{{width:100%;border-collapse:collapse;font-size:13px}}
+  table.kv td{{padding:5px 0;border-bottom:1px solid #f0f1f4}}
+  table.kv td:last-child{{text-align:right;white-space:nowrap}}
+  table.kv tr:last-child td{{border-bottom:none}}
+  .charts{{display:grid;grid-template-columns:repeat(auto-fit,minmax(450px,1fr));gap:20px}}
+  .chartbox{{background:#fff;border:1px solid #e1e4e8;border-radius:10px;padding:16px}}
+  .chartbox h3{{margin:0 0 4px;font-size:15px}}
+  .chartbox .desc{{color:#666;font-size:12px;margin-bottom:10px}}
+  table.raw{{border-collapse:collapse;width:100%;font-size:12px;background:#fff}}
+  table.raw th,table.raw td{{border:1px solid #e1e4e8;padding:6px 10px;text-align:right}}
+  table.raw th{{background:#f5f5f7;text-align:left}}
+  table.raw td.m{{font-weight:600;text-align:left;background:#fafafa;
+                  font-family:ui-monospace,monospace;font-size:11px}}
+  .calc{{background:#fff;border:1px solid #e1e4e8;border-radius:10px;padding:18px}}
+  .calc label{{display:inline-block;margin-right:14px}}
+  .calc input,.calc select{{padding:5px 8px;border:1px solid #ccc;border-radius:5px;font-size:13px}}
+  .calc-results table{{width:100%;border-collapse:collapse;margin-top:12px;font-size:13px}}
+  .calc-results td{{padding:6px 10px;border-bottom:1px solid #f0f1f4}}
+  .calc-results td:last-child{{text-align:right;font-weight:700;color:#0969da}}
+  .footer{{color:#666;font-size:12px;margin-top:32px;text-align:center}}
+  code{{background:#f3f4f6;padding:1px 5px;border-radius:3px;font-size:12px}}
+</style>
+</head><body><div class="wrap">
 
-    # ---------- Concurrent ----------
-    def conc_lookup(r, kind, n):
-        for entry in r.get("concurrent", {}).get(kind, []):
-            if entry.get("n_parallel") == n:
-                return entry
-        return {}
+<h1>video-bench dashboard</h1>
+<div class="sub">{len(runs)} machine(s) compared · all scenarios extrapolated from measured per-clip speed × parallel-throughput curve · lower wall-time / higher ×realtime / higher videos-per-min = better</div>
 
-    cpu_levels = sorted({e["n_parallel"] for r in runs
-                         for e in r.get("concurrent", {}).get("cpu", [])})
-    nvenc_levels = sorted({e["n_parallel"] for r in runs
-                           for e in r.get("concurrent", {}).get("nvenc", [])})
-    conc_rows = []
-    for n in cpu_levels:
-        conc_rows.append(row(f"CPU x264 ×{n} — videos/min",
-            [conc_lookup(r, "cpu", n).get("videos_per_minute") for r in runs]))
-        conc_rows.append(row(f"CPU x264 ×{n} — agg ×realtime",
-            [conc_lookup(r, "cpu", n).get("aggregate_speed_x_realtime") for r in runs]))
-    for n in nvenc_levels:
-        conc_rows.append(row(f"NVENC ×{n} — videos/min",
-            [conc_lookup(r, "nvenc", n).get("videos_per_minute") for r in runs]))
-        conc_rows.append(row(f"NVENC ×{n} — agg ×realtime",
-            [conc_lookup(r, "nvenc", n).get("aggregate_speed_x_realtime") for r in runs]))
+<h2>How long does this machine take? (the answer)</h2>
+<div class="cards">{cards}</div>
 
-    # ---------- Scenarios ----------
-    scen_rows = []
-    for k in ("edit_export_3clip", "thumbnail_grid_1fps", "subtitle_burn"):
-        scen_rows.append(row(f"{k} — wall (s)",
-            [r.get("scenarios", {}).get(k, {}).get("wall_s") for r in runs]))
-    scen_rows.append(row("subtitle_burn — × realtime",
-        [r.get("scenarios", {}).get("subtitle_burn", {}).get("speed_x_realtime") for r in runs]))
-    scen_rows.append(row("thumbnail — thumbs/sec",
-        [r.get("scenarios", {}).get("thumbnail_grid_1fps", {}).get("thumbs_per_sec") for r in runs]))
+<h2>Performance charts</h2>
+<div class="charts">
+  <div class="chartbox">
+    <h3>Single-clip encoding speed (×realtime, higher=better)</h3>
+    <div class="desc">How fast each preset processes one 30s 1080p clip. NVENC bars only appear if GPU encode actually works on the box.</div>
+    <canvas id="ch_single" height="260"></canvas>
+  </div>
+  <div class="chartbox">
+    <h3>Concurrent throughput (videos/min vs N parallel)</h3>
+    <div class="desc">Where does the throughput curve plateau? Peak = best batch concurrency setting. After plateau, more parallelism just slows everyone down.</div>
+    <canvas id="ch_concurrent" height="260"></canvas>
+  </div>
+  <div class="chartbox">
+    <h3>Quality vs encoding time (PSNR @ 4 Mbps)</h3>
+    <div class="desc">Up-and-left is best (high quality, low time). Each marker is one preset on one machine.</div>
+    <canvas id="ch_quality" height="260"></canvas>
+  </div>
+  <div class="chartbox">
+    <h3>Customer batch scenario (100× 1-min videos, minutes)</h3>
+    <div class="desc">Estimated wall-clock for the headline batch jobs. Lower = better.</div>
+    <canvas id="ch_scenarios" height="260"></canvas>
+  </div>
+</div>
 
-    # ---------- Verdict ----------
-    def verdict(r):
-        tests = r.get("single", {}).get("tests", {})
-        cpu_speed = tests.get("x264_1080p_medium", {}).get("speed_x_realtime") or 0
-        nvenc_speed = tests.get("nvenc_h264_1080p", {}).get("speed_x_realtime") or 0
-        cpu_lvl = r.get("concurrent", {}).get("cpu", [])
-        max_cpu_thru = max((e.get("videos_per_minute") or 0 for e in cpu_lvl), default=0)
-        return {
-            "1080p x264 speed": f"{cpu_speed:.1f}× realtime" if cpu_speed else "—",
-            "1080p NVENC speed": f"{nvenc_speed:.1f}× realtime" if nvenc_speed else "—",
-            "Best parallel CPU throughput": f"{max_cpu_thru:.1f} videos/min" if max_cpu_thru else "—",
-        }
-    verdict_rows = []
-    keys = ["1080p x264 speed", "1080p NVENC speed", "Best parallel CPU throughput"]
-    verdicts = [verdict(r) for r in runs]
-    for k in keys:
-        verdict_rows.append(row(k, [v[k] for v in verdicts]))
+<h2>Capacity calculator</h2>
+<div class="calc">
+<div>
+  <label>Videos: <input type="number" id="cN" value="100" min="1" max="100000" style="width:80px"></label>
+  <label>Length each: <input type="number" id="cL" value="60" min="1" max="36000" style="width:80px"> sec</label>
+  <label>Preset:
+    <select id="cPreset">
+      <option value="x264_medium">x264 medium (good quality)</option>
+      <option value="x264_veryfast">x264 veryfast (fast delivery)</option>
+      <option value="x264_4k_down">4K → 1080p downscale</option>
+      <option value="x265_medium">x265 medium (smaller files)</option>
+      <option value="nvenc_h264">NVENC h264 (GPU)</option>
+    </select>
+  </label>
+</div>
+<div class="calc-results" id="calcResults"></div>
+</div>
 
-    # ---------- Quality (PSNR/SSIM at fixed bitrate) ----------
-    qual_rows = []
-    qual_keys = sorted({k for r in runs for k in r.get("quality", {}).get("tests", {}).keys()})
-    for k in qual_keys:
-        qual_rows.append(row(f"{k} — encode wall (s)",
-            [r.get("quality", {}).get("tests", {}).get(k, {}).get("encode_wall_s") for r in runs]))
-        qual_rows.append(row(f"{k} — PSNR (dB, higher=better)",
-            [r.get("quality", {}).get("tests", {}).get(k, {}).get("psnr_db") for r in runs]))
-        qual_rows.append(row(f"{k} — SSIM (closer to 1.0 = better)",
-            [r.get("quality", {}).get("tests", {}).get(k, {}).get("ssim") for r in runs]))
+<h2>Hardware probe</h2>
+<table class="raw">
+{header_row(labels)}
+{''.join(probe_rows)}
+</table>
 
-    sections = [
-        ("Verdict (TL;DR)", verdict_rows),
-        ("Hardware / probe", probe_rows),
-        ("Single-clip render times", single_rows),
-        ("Concurrent throughput", conc_rows),
-        ("Realistic scenarios", scen_rows),
-        ("Encoding quality vs speed (PSNR/SSIM @ 4 Mbps)", qual_rows),
-    ]
+<div class="footer">
+  Estimates based on this machine's measured single-clip ×realtime × parallel-efficiency boost.
+  Real long-running batches may differ ±10–20% due to GOP overhead, I/O contention, thermal throttling.
+  · Source: <a href="https://github.com/oyzh888/video-bench">github.com/oyzh888/video-bench</a>
+</div>
 
-    parts = ['<!doctype html><meta charset="utf-8"><title>video-bench report</title>',
-             '<style>',
-             'body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:24px;max-width:1400px;color:#111}',
-             'h1{margin:0 0 4px}h2{margin-top:32px;border-bottom:2px solid #ddd;padding-bottom:4px}',
-             'table{border-collapse:collapse;margin:8px 0;font-size:13px;width:100%}',
-             'th,td{border:1px solid #ddd;padding:6px 10px;text-align:right}',
-             'th{background:#f5f5f7;text-align:left}',
-             'td.m{font-weight:600;text-align:left;background:#fafafa;font-family:ui-monospace,monospace;font-size:12px}',
-             'td.na{color:#aaa}',
-             '.note{color:#666;font-size:13px}',
-             '</style>',
-             f'<h1>video-bench report</h1>',
-             f'<div class="note">{len(runs)} run(s) compared. Lower wall-time and higher ×realtime / videos-per-minute = better.</div>']
+<script>
+const RUNS = {json.dumps(calc)};
+const CD = {json.dumps(cd)};
+const COLORS = ['#0969da','#cf222e','#1a7f37','#9a6700','#8250df','#bf3989','#0a3069'];
 
-    for title, rows in sections:
-        parts.append(f'<h2>{html.escape(title)}</h2>')
-        parts.append('<table>')
-        parts.append(header_row(labels))
-        parts.extend(rows)
-        parts.append('</table>')
+// === Single-clip speed bar chart ===
+{{
+  const tests = ['x264_1080p_medium','x264_1080p_veryfast','x264_4k_to_1080p',
+                 'x265_1080p_medium','nvenc_h264_1080p','decode_only_4k'];
+  const haveAny = (k) => CD.single_speed[k] && CD.single_speed[k].some(v => v != null);
+  const used = tests.filter(haveAny);
+  new Chart(document.getElementById('ch_single'), {{
+    type:'bar',
+    data:{{
+      labels: used,
+      datasets: CD.labels.map((lab,i) => ({{
+        label: lab,
+        data: used.map(k => CD.single_speed[k][i] || 0),
+        backgroundColor: COLORS[i % COLORS.length],
+      }})),
+    }},
+    options: {{
+      indexAxis:'y',
+      scales:{{x:{{title:{{display:true,text:'× realtime'}}}}}},
+      plugins:{{legend:{{position:'top'}}}}
+    }}
+  }});
+}}
 
-    parts.append('<h2>Raw runs</h2><ul>')
-    for r in runs:
-        parts.append(
-            f'<li>{html.escape(label(r))} — started {html.escape(r.get("started_at",""))}, '
-            f'total {r.get("total_wall_s","?")}s</li>')
-    parts.append('</ul>')
-    return "\n".join(parts)
+// === Concurrent throughput line chart ===
+{{
+  new Chart(document.getElementById('ch_concurrent'), {{
+    type:'line',
+    data:{{
+      datasets: CD.concurrent.map((c,i) => ({{
+        label: c.label,
+        data: c.points.map(p => ({{x:p[0], y:p[1]}})),
+        borderColor: COLORS[i % COLORS.length],
+        backgroundColor: COLORS[i % COLORS.length],
+        tension:0.2,
+      }}))
+    }},
+    options: {{
+      scales:{{
+        x:{{type:'linear',title:{{display:true,text:'parallel jobs (N)'}}}},
+        y:{{title:{{display:true,text:'videos / minute'}}}}
+      }}
+    }}
+  }});
+}}
+
+// === Quality scatter ===
+{{
+  const byMachine = {{}};
+  CD.quality.forEach(p => {{
+    if (!byMachine[p.machine]) byMachine[p.machine] = [];
+    byMachine[p.machine].push({{x:p.x, y:p.y, preset:p.preset}});
+  }});
+  new Chart(document.getElementById('ch_quality'), {{
+    type:'scatter',
+    data:{{
+      datasets: Object.entries(byMachine).map(([m,pts],i) => ({{
+        label: m,
+        data: pts,
+        backgroundColor: COLORS[i % COLORS.length],
+        pointRadius: 7,
+      }}))
+    }},
+    options: {{
+      scales:{{
+        x:{{title:{{display:true,text:'encode wall (s, lower=better)'}}}},
+        y:{{title:{{display:true,text:'PSNR dB (higher=better)'}}}}
+      }},
+      plugins:{{tooltip:{{callbacks:{{
+        label: ctx => `${{ctx.raw.preset}}: ${{ctx.raw.x.toFixed(2)}}s, ${{ctx.raw.y.toFixed(2)}} dB`
+      }}}}}}
+    }}
+  }});
+}}
+
+// === Customer scenario bars ===
+{{
+  const scenarios = ['100× 1min medium','100× 1min veryfast','100× 1min 4K→1080p',
+                     '5min export','30min export','60min export'];
+  const presetMap = {{
+    '100× 1min medium': ['x264_medium', 100, 60],
+    '100× 1min veryfast': ['x264_veryfast', 100, 60],
+    '100× 1min 4K→1080p': ['x264_4k_down', 100, 60],
+    '5min export': ['x264_medium', 1, 5*60],
+    '30min export': ['x264_medium', 1, 30*60],
+    '60min export': ['x264_medium', 1, 60*60],
+  }};
+  function batch(run, preset, n, l) {{
+    const speed = run.speed[preset];
+    if (!speed) return null;
+    const eff = (n > 1) ? (run.parallel_efficiency || 1) : 1;
+    return n * l / (speed * eff) / 60; // minutes
+  }}
+  new Chart(document.getElementById('ch_scenarios'), {{
+    type:'bar',
+    data:{{
+      labels: scenarios,
+      datasets: RUNS.map((r,i) => ({{
+        label: r.label,
+        data: scenarios.map(s => batch(r, ...presetMap[s])),
+        backgroundColor: COLORS[i % COLORS.length],
+      }}))
+    }},
+    options: {{
+      scales:{{y:{{title:{{display:true,text:'estimated wall time (min)'}}}}}},
+      plugins:{{tooltip:{{callbacks:{{
+        label: ctx => `${{ctx.dataset.label}}: ${{ctx.parsed.y.toFixed(2)}} min`
+      }}}}}}
+    }}
+  }});
+}}
+
+// === Calculator ===
+function recalc() {{
+  const N = +document.getElementById('cN').value;
+  const L = +document.getElementById('cL').value;
+  const preset = document.getElementById('cPreset').value;
+  let html = '<table>';
+  html += '<tr><th style="text-align:left">Machine</th><th style="text-align:right">Wall time</th><th style="text-align:right">Per-video</th></tr>';
+  RUNS.forEach(r => {{
+    const speed = r.speed[preset];
+    if (!speed) {{
+      html += `<tr><td>${{r.label}}</td><td style="text-align:right;color:#aaa">preset not measured</td><td>—</td></tr>`;
+      return;
+    }}
+    const eff = N > 1 ? (r.parallel_efficiency || 1) : 1;
+    const totalSec = N * L / (speed * eff);
+    const perVid = L / speed;
+    const fmt = (s) => s < 60 ? s.toFixed(1)+' sec' : (s < 3600 ? (s/60).toFixed(1)+' min' : (s/3600).toFixed(2)+' hr');
+    html += `<tr><td>${{r.label}}</td><td>${{fmt(totalSec)}}</td><td>${{fmt(perVid)}}</td></tr>`;
+  }});
+  html += '</table>';
+  document.getElementById('calcResults').innerHTML = html;
+}}
+['cN','cL','cPreset'].forEach(id => document.getElementById(id).addEventListener('input', recalc));
+recalc();
+</script>
+</div></body></html>"""
 
 
 def main():
