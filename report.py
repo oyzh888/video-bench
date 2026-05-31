@@ -113,6 +113,17 @@ def verdict_card(run: dict) -> str:
       <div class="dim-bar"><div class="dim-fill" style="width:{s:.0f}%"></div><span class="dim-score">{s:.0f}</span></div>{note_html}
     </div>"""
 
+    # Optimization headline: only present when bench/optimized.py ran AND found gain
+    opt = run.get("optimized", {}) or {}
+    opt_speedup = opt.get("headline_speedup_x")
+    opt_best = opt.get("best_aggregate_x_realtime")
+    opt_html = ""
+    if opt_speedup and opt_speedup >= 1.2:
+        opt_html = (f'<div class="opt-banner">⚡ <b>{opt_speedup}× speedup</b> '
+                    f'available with NUMA/CCD pinning '
+                    f'(reaches {opt_best:.1f}× realtime aggregate). '
+                    f'See "Optimization potential" section below for command.</div>')
+
     return f"""
 <div class="card">
   <div class="card-top">
@@ -126,6 +137,7 @@ def verdict_card(run: dict) -> str:
     </div>
   </div>
   <div class="tier-blurb">{html.escape(sc['tier_blurb'])}</div>
+  {opt_html}
   <div class="dim-grid">{dim_bars}</div>
   <details class="card-details"><summary>Capacity scenarios</summary>
   <table class="kv">
@@ -162,6 +174,64 @@ def leaderboard(runs: list[dict]) -> str:
             f"<td><b>{(sc['composite'] or 0):.1f}</b></td>"
             + "".join(cells) + "</tr>")
     return f"<table class='leaderboard'>{head}{''.join(rows)}</table>"
+
+
+def optimization_section(runs: list[dict]) -> str:
+    """Per-machine 'how to make this box go faster' breakdown.
+    Only renders for machines where bench/optimized.py ran AND found a real gain."""
+    parts = []
+    for run in runs:
+        opt = run.get("optimized", {}) or {}
+        if not opt.get("feasible"):
+            continue
+        if not opt.get("headline_speedup_x") or opt.get("headline_speedup_x") < 1.2:
+            continue
+        topo = opt.get("topology", {}) or {}
+        l3 = topo.get("l3_count")
+        sockets = topo.get("sockets")
+        cps = topo.get("cores_per_socket")
+        threads = topo.get("threads_per_core")
+        rows = []
+        for k, v in opt.get("tests", {}).items():
+            rows.append(
+                f"<tr><td><code>{html.escape(k)}</code></td>"
+                f"<td>{v.get('n_procs')}</td>"
+                f"<td>{v.get('threads_per')}</td>"
+                f"<td>{'yes' if v.get('pinned') else 'no'}</td>"
+                f"<td>{v.get('wall_s')}</td>"
+                f"<td><b>{v.get('aggregate_speed_x_realtime')}× rt</b></td></tr>")
+        # Generate the actual ready-to-run shell snippet
+        n = l3 or 12
+        snippet = f"""# Optimal recipe for this machine (auto-generated):
+# {sockets}-socket × {cps}-core × {threads}-thread, {l3} L3 caches (CCDs)
+# Run {n} ffmpeg processes, each pinned to one CCD (8 cores), threads=8.
+
+for i in $(seq 0 {n-1}); do
+  start=$((i*8)); end=$((start+7))
+  taskset -c $start-$end ffmpeg -y -threads 8 \\
+    -i input_$i.mp4 -c:v libx264 -threads 8 -preset medium -crf 23 -an \\
+    output_$i.mp4 &
+done
+wait"""
+        parts.append(f"""
+<div class="opt-section">
+  <h3 style="margin:0 0 4px">Optimization potential — {html.escape(short_label(run))}</h3>
+  <div style="color:#666;font-size:12px;margin-bottom:10px">
+    Topology: {sockets}-socket, {cps}c/socket, SMT={threads}, {l3} L3 caches.
+    The default ffmpeg behaviour ({{cores}}-thread auto-detect) explodes on
+    big-server CPUs — careful pinning recovers <b>{opt['headline_speedup_x']}×</b> throughput.
+  </div>
+  <table class="opt-table">
+    <tr><th>config</th><th>N procs</th><th>threads/proc</th><th>pinned?</th><th>wall (s)</th><th>aggregate</th></tr>
+    {''.join(rows)}
+  </table>
+  <details><summary style="cursor:pointer;color:#0969da;font-size:12px">Ready-to-run shell recipe</summary>
+  <pre>{html.escape(snippet)}</pre>
+  </details>
+</div>""")
+    if not parts:
+        return ""
+    return "<h2>Optimization potential (NUMA / CCD pinning)</h2>" + "".join(parts)
 
 
 def radar_data(runs: list[dict]) -> dict:
@@ -301,6 +371,13 @@ def render(runs: list[dict]) -> str:
   .dim-fill{{position:absolute;top:0;left:0;height:100%;background:linear-gradient(90deg,#22c55e,#0969da);border-radius:7px;transition:width .4s}}
   .dim-score{{position:absolute;right:8px;top:0;font-size:11px;font-weight:700;color:#222;line-height:14px}}
   .dim-note{{font-size:11px;color:#9a6700;margin-top:3px;font-style:italic}}
+  .opt-banner{{margin:8px 0 4px;padding:8px 12px;background:linear-gradient(90deg,#fef3c7,#fde68a);border:1px solid #f59e0b;border-radius:6px;font-size:12px;color:#7c2d12}}
+  .opt-section{{background:#fff;border:1px solid #e1e4e8;border-radius:10px;padding:18px;margin-top:8px;font-size:13px}}
+  .opt-section pre{{background:#0d1117;color:#e6edf3;padding:12px;border-radius:6px;overflow-x:auto;font-size:12px;line-height:1.5}}
+  .opt-table{{width:100%;border-collapse:collapse;margin:8px 0}}
+  .opt-table th,.opt-table td{{padding:5px 10px;border-bottom:1px solid #eee;text-align:right;font-size:12px}}
+  .opt-table th{{background:#f5f5f7;text-align:left}}
+  .opt-table td:first-child,.opt-table th:first-child{{text-align:left}}
   details.card-details{{margin-top:8px;font-size:13px}}
   details.card-details summary{{cursor:pointer;color:#0969da;font-size:12px;outline:none}}
   table.leaderboard{{width:100%;border-collapse:collapse;background:#fff;font-size:13px}}
@@ -344,6 +421,8 @@ Tiers: <span class="pill" style="background:#a855f7">S</span> 90+ ·
 
 <h2>Score breakdown — each machine</h2>
 <div class="cards">{cards}</div>
+
+{optimization_section(runs)}
 
 <h2>Score profile (radar)</h2>
 <div class="chartbox" style="max-width:600px;margin:0 auto"><canvas id="ch_radar" height="380"></canvas></div>

@@ -220,5 +220,66 @@
       }
     }
   },
-  "total_wall_s": 153.6
+  "total_wall_s": 153.6,
+  "optimized": {
+    "feasible": true,
+    "reason": "192 cores across 12 L3 caches \u2014 CCD pinning should help",
+    "topology": {
+      "linux": true,
+      "sockets": 2,
+      "cores_per_socket": 48,
+      "threads_per_core": 2,
+      "total_logical": 192,
+      "l3_count": 12
+    },
+    "tests": {
+      "baseline_1proc_16threads": {
+        "n_procs": 1,
+        "threads_per": 16,
+        "pinned": false,
+        "wall_s": 5.618,
+        "aggregate_speed_x_realtime": 5.34,
+        "videos_per_minute": 10.68,
+        "per_video_wall_s": 5.618
+      },
+      "pinned_4procs_8threads": {
+        "n_procs": 4,
+        "threads_per": 8,
+        "pinned": true,
+        "wall_s": 13.459,
+        "aggregate_speed_x_realtime": 8.92,
+        "videos_per_minute": 17.83,
+        "per_video_wall_s": 13.459
+      },
+      "pinned_12procs_8threads": {
+        "n_procs": 12,
+        "threads_per": 8,
+        "pinned": true,
+        "wall_s": 42.021,
+        "aggregate_speed_x_realtime": 8.57,
+        "videos_per_minute": 17.13,
+        "per_video_wall_s": 42.021
+      },
+      "pinned_24procs_8threads": {
+        "n_procs": 24,
+        "threads_per": 8,
+        "pinned": true,
+        "wall_s": 111.331,
+        "aggregate_speed_x_realtime": 6.47,
+        "videos_per_minute": 12.93,
+        "per_video_wall_s": 111.331
+      },
+      "unpinned_12procs_8threads": {
+        "n_procs": 12,
+        "threads_per": 8,
+        "pinned": false,
+        "wall_s": 49.725,
+        "aggregate_speed_x_realtime": 7.24,
+        "videos_per_minute": 14.48,
+        "per_video_wall_s": 49.725
+      }
+    },
+    "headline_speedup_x": 1.67,
+    "best_aggregate_x_realtime": 8.92
+  }
 }

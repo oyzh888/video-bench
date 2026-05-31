@@ -8,14 +8,14 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
 from lib.common import RESULTS, hostname, now_iso
-from bench import probe, single, concurrent, scenarios, quality
+from bench import probe, single, concurrent, scenarios, quality, optimized
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--quick", action="store_true", help="Smoke test (~1 min)")
     ap.add_argument("--skip", nargs="*", default=[],
-                    choices=["single", "concurrent", "scenarios", "quality"])
+                    choices=["single", "concurrent", "scenarios", "quality", "optimized"])
     ap.add_argument("--label", default=None,
                     help="Optional label appended to output filename")
     args = ap.parse_args()
@@ -49,6 +49,10 @@ def main() -> None:
     if "quality" not in args.skip:
         print("→ quality (PSNR/SSIM at fixed bitrate)...")
         out["quality"] = quality.main(quick=args.quick)
+
+    if "optimized" not in args.skip:
+        print("→ optimized (NUMA/CCD-pinning if applicable)...")
+        out["optimized"] = optimized.main(quick=args.quick)
 
     out["total_wall_s"] = round(time.perf_counter() - t0, 1)
 
