@@ -46,22 +46,57 @@ def _scale_inverse(value: Optional[float], best: float, worst: float) -> Optiona
 # ----- Per-dimension scorers ---------------------------------------------
 
 def score_cpu_encode(run: dict) -> dict:
-    """x264 medium 1080p ×realtime. 1× → 0, 10× → 100."""
+    """x264 medium 1080p ×realtime. 1× → 0, 10× → 100.
+
+    Includes raw fps for context — that's the per-process throughput you
+    actually feel as a single-creator workflow. High-clock laptop CPUs
+    (Arrow Lake-HX, Apple M-series) often hit 280+ fps, while 100+ core
+    server EPYCs land at 150-230 fps even though they have 10× more cores.
+    """
     speed = _get(run, "single", "tests", "x264_1080p_medium", "speed_x_realtime")
+    fps = _get(run, "single", "tests", "x264_1080p_medium", "ffmpeg_fps")
     score = _scale(speed, 1.0, 10.0)
-    return {"score": score, "raw": speed,
+    raw_str = f"{speed:.2f}× rt" if speed else "—"
+    if fps:
+        raw_str += f" ({fps:.0f} fps)"
+    return {"score": score, "raw": raw_str,
             "raw_unit": "× realtime",
             "label": "CPU encoding (1080p x264 medium)"}
 
 
 def score_parallel(run: dict) -> dict:
-    """Best videos/min observed across the concurrent CPU sweep. 5 → 0, 60 → 100."""
+    """Best videos/min observed across the concurrent CPU sweep. 5 → 0, 60 → 100.
+
+    Also detects the 'big-server flat-curve' anti-pattern: when N=1 → N=8 gives
+    less than +30% throughput, the machine is being capped by ffmpeg's
+    internal threading (typically ~16 threads/process) and/or NUMA effects,
+    not core count. This shows up on EPYC servers with 100+ cores running
+    single ffmpeg instances and is genuinely surprising.
+    """
     cpu = _get(run, "concurrent", "cpu", default=[]) or []
-    best = max((e.get("videos_per_minute") or 0) for e in cpu) if cpu else None
-    score = _scale(best, 5.0, 60.0) if best else None
-    return {"score": score, "raw": round(best, 2) if best else None,
+    if not cpu:
+        return {"score": None, "raw": None, "raw_unit": "videos / min",
+                "label": "Parallel throughput (peak)"}
+    best = max((e.get("videos_per_minute") or 0) for e in cpu)
+    score = _scale(best, 5.0, 60.0)
+
+    # Detect flat-curve anti-pattern
+    n1 = next((e for e in cpu if e.get("n_parallel") == 1), None)
+    n8 = next((e for e in cpu if e.get("n_parallel") == 8), None)
+    note = None
+    if n1 and n8:
+        speedup = (n8.get("aggregate_speed_x_realtime") or 0) / max(
+            n1.get("aggregate_speed_x_realtime") or 1, 0.01)
+        cores = _get(run, "probe", "cpu", "cores") or 0
+        if speedup < 1.3 and cores >= 32:
+            note = (f"Flat throughput curve ({speedup:.2f}× from N=1→N=8) on a "
+                    f"{cores}-core box — ffmpeg threading or NUMA is the cap, "
+                    f"not cores. Single-stream speed matters more than core count here.")
+
+    return {"score": score, "raw": round(best, 2),
             "raw_unit": "videos / min",
-            "label": "Parallel throughput (peak)"}
+            "label": "Parallel throughput (peak)",
+            "note": note}
 
 
 def score_gpu(run: dict) -> dict:
