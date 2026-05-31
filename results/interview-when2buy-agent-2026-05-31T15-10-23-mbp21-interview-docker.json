@@ -1,0 +1,210 @@
+{
+  "schema_version": 1,
+  "hostname": "interview-when2buy-agent",
+  "started_at": "2026-05-31T15-10-23",
+  "quick": false,
+  "label": "mbp21-interview-docker",
+  "probe": {
+    "platform": "Linux-5.15.49-linuxkit-pr-aarch64-with-glibc2.36",
+    "python": "3.11.2",
+    "cpu": {
+      "arch": "aarch64",
+      "cores": 5,
+      "physical_cores": 0
+    },
+    "mem": {
+      "total_gb": 7.7
+    },
+    "gpus": [],
+    "ffmpeg": {
+      "version": "ffmpeg version 5.1.9-0+deb12u1 Copyright (c) 2000-2026 the FFmpeg developers",
+      "encoders": [
+        "libx264",
+        "libx265",
+        "h264_nvenc",
+        "hevc_nvenc",
+        "libvpx-vp9",
+        "libaom-av1",
+        "libsvtav1"
+      ],
+      "nvenc": false,
+      "nvdec": false
+    },
+    "disk": {
+      "tmpdir": "/tmp/claude-0",
+      "write_MBps": 980.9,
+      "read_MBps": 2942.9,
+      "size_mb_tested": 256
+    }
+  },
+  "single": {
+    "source_clip_seconds": 30,
+    "tests": {
+      "x264_1080p_medium": {
+        "ok": true,
+        "wall_s": 8.077,
+        "src_duration_s": 30.0,
+        "speed_x_realtime": 3.71,
+        "ffmpeg_speed": 3.78,
+        "ffmpeg_fps": 113.0,
+        "output_bytes": 22262479,
+        "cmd": "/usr/bin/ffmpeg -y -hide_banner -i /workspace/sessions/interview-home/video-bench/assets/src_1080p_30s.mp4 -c:v libx264 -preset medium -crf 23 -c:a copy /workspace/sessions/interview-home/video-bench/assets/out_single/x264_1080p_medium.mp4",
+        "error": null
+      },
+      "x264_1080p_veryfast": {
+        "ok": true,
+        "wall_s": 5.104,
+        "src_duration_s": 30.0,
+        "speed_x_realtime": 5.88,
+        "ffmpeg_speed": 6.0,
+        "ffmpeg_fps": 180.0,
+        "output_bytes": 19428735,
+        "cmd": "/usr/bin/ffmpeg -y -hide_banner -i /workspace/sessions/interview-home/video-bench/assets/src_1080p_30s.mp4 -c:v libx264 -preset veryfast -crf 23 -c:a copy /workspace/sessions/interview-home/video-bench/assets/out_single/x264_1080p_veryfast.mp4",
+        "error": null
+      },
+      "x265_1080p_medium": {
+        "ok": true,
+        "wall_s": 160.755,
+        "src_duration_s": 30.0,
+        "speed_x_realtime": 0.19,
+        "ffmpeg_speed": 0.187,
+        "ffmpeg_fps": 5.6,
+        "output_bytes": 16439896,
+        "cmd": "/usr/bin/ffmpeg -y -hide_banner -i /workspace/sessions/interview-home/video-bench/assets/src_1080p_30s.mp4 -c:v libx265 -preset medium -crf 28 -c:a copy /workspace/sessions/interview-home/video-bench/assets/out_single/x265_1080p_medium.mp4",
+        "error": null
+      },
+      "x264_4k_to_1080p": {
+        "ok": true,
+        "wall_s": 10.462,
+        "src_duration_s": 30.0,
+        "speed_x_realtime": 2.87,
+        "ffmpeg_speed": 2.91,
+        "ffmpeg_fps": 87.0,
+        "output_bytes": 8572510,
+        "cmd": "/usr/bin/ffmpeg -y -hide_banner -i /workspace/sessions/interview-home/video-bench/assets/src_2160p_30s.mp4 -vf scale=1920:1080 -c:v libx264 -preset medium -crf 23 -c:a copy /workspace/sessions/interview-home/video-bench/assets/out_single/x264_4k_to_1080p.mp4",
+        "error": null
+      },
+      "decode_only_4k": {
+        "ok": true,
+        "wall_s": 3.766,
+        "src_duration_s": 30.0,
+        "speed_x_realtime": 7.97,
+        "ffmpeg_fps": 248.0,
+        "error": null
+      }
+    }
+  },
+  "concurrent": {
+    "source_clip_seconds": 20,
+    "cpu": [
+      {
+        "n_parallel": 1,
+        "vcodec": "libx264",
+        "wall_s": 3.479,
+        "avg_per_job_wall_s": 3.479,
+        "ok_count": 1,
+        "videos_per_minute": 17.25,
+        "aggregate_speed_x_realtime": 5.75,
+        "first_error": null
+      },
+      {
+        "n_parallel": 2,
+        "vcodec": "libx264",
+        "wall_s": 5.244,
+        "avg_per_job_wall_s": 5.231,
+        "ok_count": 2,
+        "videos_per_minute": 22.88,
+        "aggregate_speed_x_realtime": 7.63,
+        "first_error": null
+      },
+      {
+        "n_parallel": 4,
+        "vcodec": "libx264",
+        "wall_s": 9.834,
+        "avg_per_job_wall_s": 9.681,
+        "ok_count": 4,
+        "videos_per_minute": 24.4,
+        "aggregate_speed_x_realtime": 8.13,
+        "first_error": null
+      },
+      {
+        "n_parallel": 8,
+        "vcodec": "libx264",
+        "wall_s": 19.274,
+        "avg_per_job_wall_s": 18.898,
+        "ok_count": 8,
+        "videos_per_minute": 24.9,
+        "aggregate_speed_x_realtime": 8.3,
+        "first_error": null
+      },
+      {
+        "n_parallel": 16,
+        "vcodec": "libx264",
+        "wall_s": 40.475,
+        "avg_per_job_wall_s": 39.837,
+        "ok_count": 16,
+        "videos_per_minute": 23.72,
+        "aggregate_speed_x_realtime": 7.91,
+        "first_error": null
+      }
+    ],
+    "nvenc": []
+  },
+  "scenarios": {
+    "edit_export_3clip": {
+      "ok": true,
+      "wall_s": 4.011,
+      "output_bytes": 9170244,
+      "error": null
+    },
+    "thumbnail_grid_1fps": {
+      "ok": true,
+      "wall_s": 1.261,
+      "thumbnails": 30,
+      "thumbs_per_sec": 23.8,
+      "error": null
+    },
+    "subtitle_burn": {
+      "ok": true,
+      "wall_s": 5.236,
+      "speed_x_realtime": 5.73,
+      "error": null
+    }
+  },
+  "quality": {
+    "target_bitrate_kbps": 4000,
+    "tests": {
+      "libx264_ultrafast": {
+        "ok": true,
+        "encode_wall_s": 1.78,
+        "psnr_db": 39.680292,
+        "ssim": 0.983684,
+        "output_bytes": 10396271
+      },
+      "libx264_veryfast": {
+        "ok": true,
+        "encode_wall_s": 3.73,
+        "psnr_db": 41.841655,
+        "ssim": 0.992821,
+        "output_bytes": 10207902
+      },
+      "libx264_medium": {
+        "ok": true,
+        "encode_wall_s": 5.445,
+        "psnr_db": 42.508827,
+        "ssim": 0.992996,
+        "output_bytes": 10217212
+      }
+    }
+  },
+  "optimized": {
+    "feasible": false,
+    "reason": "only 5 logical CPUs \u2014 pinning gain is small",
+    "topology": {
+      "linux": true,
+      "error": "invalid literal for int() with base 10: '-'"
+    },
+    "tests": {}
+  },
+  "total_wall_s": 339.9
+}
