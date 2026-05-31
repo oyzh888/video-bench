@@ -81,7 +81,11 @@ def ffmpeg_info() -> dict:
 
 
 def disk_info() -> dict:
-    """Quick disk speed: write 256 MB sequentially, read it back."""
+    """Quick disk speed: write 256 MB sequentially, read it back.
+
+    Linux will otherwise satisfy the read from page cache because the file was
+    just written, which reports memory speed rather than storage speed.
+    """
     import time, tempfile
     target = Path(tempfile.gettempdir()) / "vbench_disk.bin"
     size_mb = 256
@@ -93,9 +97,13 @@ def disk_info() -> dict:
                 f.write(chunk)
             f.flush()
             os.fsync(f.fileno())
+            if hasattr(os, "posix_fadvise"):
+                os.posix_fadvise(f.fileno(), 0, 0, os.POSIX_FADV_DONTNEED)
         dt_w = time.perf_counter() - t0
         t0 = time.perf_counter()
         with open(target, "rb") as f:
+            if hasattr(os, "posix_fadvise"):
+                os.posix_fadvise(f.fileno(), 0, 0, os.POSIX_FADV_DONTNEED)
             while f.read(1024 * 1024):
                 pass
         dt_r = time.perf_counter() - t0
