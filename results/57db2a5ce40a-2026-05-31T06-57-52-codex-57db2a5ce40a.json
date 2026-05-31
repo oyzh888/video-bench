@@ -1,0 +1,203 @@
+{
+  "schema_version": 1,
+  "hostname": "57db2a5ce40a",
+  "started_at": "2026-05-31T06-57-52",
+  "quick": false,
+  "label": "codex-57db2a5ce40a",
+  "probe": {
+    "platform": "Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.36",
+    "python": "3.11.2",
+    "cpu": {
+      "arch": "x86_64",
+      "cores": 24,
+      "model": "Intel(R) Core(TM) Ultra 9 275HX",
+      "physical_cores": 24
+    },
+    "mem": {
+      "total_gb": 31.1
+    },
+    "gpus": [],
+    "ffmpeg": {
+      "version": "ffmpeg version 5.1.8-0+deb12u1 Copyright (c) 2000-2025 the FFmpeg developers",
+      "encoders": [
+        "libx264",
+        "libx265",
+        "h264_nvenc",
+        "hevc_nvenc",
+        "libvpx-vp9",
+        "libaom-av1",
+        "libsvtav1",
+        "h264_qsv"
+      ],
+      "nvenc": false,
+      "nvdec": false
+    },
+    "disk": {
+      "tmpdir": "/tmp",
+      "write_MBps": 1555.0,
+      "read_MBps": 13187.8,
+      "size_mb_tested": 256
+    }
+  },
+  "single": {
+    "source_clip_seconds": 30,
+    "tests": {
+      "x264_1080p_medium": {
+        "ok": true,
+        "wall_s": 2.895,
+        "src_duration_s": 30.0,
+        "speed_x_realtime": 10.36,
+        "ffmpeg_speed": 10.8,
+        "ffmpeg_fps": 323.0,
+        "output_bytes": 23320805,
+        "cmd": "/usr/bin/ffmpeg -y -hide_banner -i /tmp/video-bench-test/assets/src_1080p_30s.mp4 -c:v libx264 -preset medium -crf 23 -c:a copy /tmp/video-bench-test/assets/out_single/x264_1080p_medium.mp4",
+        "error": null
+      },
+      "x264_1080p_veryfast": {
+        "ok": true,
+        "wall_s": 1.635,
+        "src_duration_s": 30.0,
+        "speed_x_realtime": 18.34,
+        "ffmpeg_speed": 19.4,
+        "ffmpeg_fps": 583.0,
+        "output_bytes": 20630512,
+        "cmd": "/usr/bin/ffmpeg -y -hide_banner -i /tmp/video-bench-test/assets/src_1080p_30s.mp4 -c:v libx264 -preset veryfast -crf 23 -c:a copy /tmp/video-bench-test/assets/out_single/x264_1080p_veryfast.mp4",
+        "error": null
+      },
+      "x265_1080p_medium": {
+        "ok": true,
+        "wall_s": 8.421,
+        "src_duration_s": 30.0,
+        "speed_x_realtime": 3.56,
+        "ffmpeg_speed": 3.6,
+        "ffmpeg_fps": 108.0,
+        "output_bytes": 16732410,
+        "cmd": "/usr/bin/ffmpeg -y -hide_banner -i /tmp/video-bench-test/assets/src_1080p_30s.mp4 -c:v libx265 -preset medium -crf 28 -c:a copy /tmp/video-bench-test/assets/out_single/x265_1080p_medium.mp4",
+        "error": null
+      },
+      "x264_4k_to_1080p": {
+        "ok": true,
+        "wall_s": 3.89,
+        "src_duration_s": 30.0,
+        "speed_x_realtime": 7.71,
+        "ffmpeg_speed": 7.99,
+        "ffmpeg_fps": 239.0,
+        "output_bytes": 8716793,
+        "cmd": "/usr/bin/ffmpeg -y -hide_banner -i /tmp/video-bench-test/assets/src_2160p_30s.mp4 -vf scale=1920:1080 -c:v libx264 -preset medium -crf 23 -c:a copy /tmp/video-bench-test/assets/out_single/x264_4k_to_1080p.mp4",
+        "error": null
+      },
+      "decode_only_4k": {
+        "ok": true,
+        "wall_s": 1.404,
+        "src_duration_s": 30.0,
+        "speed_x_realtime": 21.37,
+        "ffmpeg_fps": 696.0,
+        "error": null
+      }
+    }
+  },
+  "concurrent": {
+    "source_clip_seconds": 20,
+    "cpu": [
+      {
+        "n_parallel": 1,
+        "vcodec": "libx264",
+        "wall_s": 1.257,
+        "avg_per_job_wall_s": 1.256,
+        "ok_count": 1,
+        "videos_per_minute": 47.73,
+        "aggregate_speed_x_realtime": 15.91,
+        "first_error": null
+      },
+      {
+        "n_parallel": 2,
+        "vcodec": "libx264",
+        "wall_s": 1.924,
+        "avg_per_job_wall_s": 1.918,
+        "ok_count": 2,
+        "videos_per_minute": 62.38,
+        "aggregate_speed_x_realtime": 20.79,
+        "first_error": null
+      },
+      {
+        "n_parallel": 4,
+        "vcodec": "libx264",
+        "wall_s": 3.208,
+        "avg_per_job_wall_s": 3.174,
+        "ok_count": 4,
+        "videos_per_minute": 74.82,
+        "aggregate_speed_x_realtime": 24.94,
+        "first_error": null
+      },
+      {
+        "n_parallel": 8,
+        "vcodec": "libx264",
+        "wall_s": 6.752,
+        "avg_per_job_wall_s": 6.646,
+        "ok_count": 8,
+        "videos_per_minute": 71.09,
+        "aggregate_speed_x_realtime": 23.7,
+        "first_error": null
+      },
+      {
+        "n_parallel": 16,
+        "vcodec": "libx264",
+        "wall_s": 12.097,
+        "avg_per_job_wall_s": 11.9,
+        "ok_count": 16,
+        "videos_per_minute": 79.36,
+        "aggregate_speed_x_realtime": 26.45,
+        "first_error": null
+      }
+    ],
+    "nvenc": []
+  },
+  "scenarios": {
+    "edit_export_3clip": {
+      "ok": true,
+      "wall_s": 1.578,
+      "output_bytes": 9779431,
+      "error": null
+    },
+    "thumbnail_grid_1fps": {
+      "ok": true,
+      "wall_s": 0.475,
+      "thumbnails": 30,
+      "thumbs_per_sec": 63.2,
+      "error": null
+    },
+    "subtitle_burn": {
+      "ok": true,
+      "wall_s": 2.305,
+      "speed_x_realtime": 13.02,
+      "error": null
+    }
+  },
+  "quality": {
+    "target_bitrate_kbps": 4000,
+    "tests": {
+      "libx264_ultrafast": {
+        "ok": true,
+        "encode_wall_s": 0.776,
+        "psnr_db": 39.345215,
+        "ssim": 0.984398,
+        "output_bytes": 9168714
+      },
+      "libx264_veryfast": {
+        "ok": true,
+        "encode_wall_s": 1.309,
+        "psnr_db": 41.110193,
+        "ssim": 0.991374,
+        "output_bytes": 9701626
+      },
+      "libx264_medium": {
+        "ok": true,
+        "encode_wall_s": 2.275,
+        "psnr_db": 41.820275,
+        "ssim": 0.991701,
+        "output_bytes": 9797802
+      }
+    }
+  },
+  "total_wall_s": 69.5
+}
